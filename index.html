@@ -74,6 +74,43 @@
                 </div>
               </div>
             </div>
+
+            <!-- ===== Cassette overlay (visible only when source = TAPE) ===== -->
+            <div class="cassette-overlay" id="cassetteOverlay" aria-hidden="true">
+              <div class="cassette-shell">
+                <div class="cassette-screws" aria-hidden="true">
+                  <span></span><span></span><span></span><span></span>
+                </div>
+                <div class="cassette-label">
+                  <div class="cassette-brand">VELOURIA</div>
+                  <div class="cassette-side">SIDE A &middot; 60</div>
+                  <div class="cassette-track" id="cassetteTrackTitle">— STAND BY —</div>
+                  <div class="cassette-counter">
+                    <span class="cc-label">COUNTER</span>
+                    <span class="cc-value" id="cassetteCounter">000</span>
+                  </div>
+                </div>
+                <div class="cassette-window" aria-hidden="true">
+                  <div class="cassette-tape-strip"></div>
+                  <div class="cassette-hub cassette-hub-left" id="cassetteHubLeft">
+                    <div class="cassette-hub-teeth"></div>
+                  </div>
+                  <div class="cassette-hub cassette-hub-right" id="cassetteHubRight">
+                    <div class="cassette-hub-teeth"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ===== AUX cable overlay (visible only when source = AUX) ===== -->
+            <div class="aux-overlay" id="auxOverlay" aria-hidden="true">
+              <div class="aux-jack aux-jack-rca">
+                <div class="aux-tag">AUX&nbsp;IN</div>
+                <div class="aux-rca aux-rca-l"><span></span></div>
+                <div class="aux-rca aux-rca-r"><span></span></div>
+              </div>
+              <div class="aux-cable"></div>
+            </div>
           </div>
 
           <div class="tonearm-mount">
@@ -393,6 +430,38 @@
             </div>
           </div>
           <div class="tuner-stereo-led" id="tunerStereoLed">STEREO</div>
+          <div class="tuner-presets" id="tunerPresets" role="group" aria-label="FM Presets">
+            <button class="tuner-preset" data-preset-idx="0" type="button">
+              <span class="tp-led" aria-hidden="true"></span>
+              <span class="tp-freq" data-tp-freq>91.5</span>
+              <span class="tp-name" data-tp-name>JAZZ FM</span>
+            </button>
+            <button class="tuner-preset" data-preset-idx="1" type="button">
+              <span class="tp-led" aria-hidden="true"></span>
+              <span class="tp-freq" data-tp-freq>96.7</span>
+              <span class="tp-name" data-tp-name>CLASSIC</span>
+            </button>
+            <button class="tuner-preset" data-preset-idx="2" type="button">
+              <span class="tp-led" aria-hidden="true"></span>
+              <span class="tp-freq" data-tp-freq>99.3</span>
+              <span class="tp-name" data-tp-name>ROCK</span>
+            </button>
+            <button class="tuner-preset" data-preset-idx="3" type="button">
+              <span class="tp-led" aria-hidden="true"></span>
+              <span class="tp-freq" data-tp-freq>102.5</span>
+              <span class="tp-name" data-tp-name>DISCO</span>
+            </button>
+            <button class="tuner-preset" data-preset-idx="4" type="button">
+              <span class="tp-led" aria-hidden="true"></span>
+              <span class="tp-freq" data-tp-freq>104.9</span>
+              <span class="tp-name" data-tp-name>SOUL</span>
+            </button>
+            <button class="tuner-preset" data-preset-idx="5" type="button">
+              <span class="tp-led" aria-hidden="true"></span>
+              <span class="tp-freq" data-tp-freq>107.1</span>
+              <span class="tp-name" data-tp-name>NEWS</span>
+            </button>
+          </div>
         </div>
       </div>
     </section>
