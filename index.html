@@ -9,6 +9,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=VT323&family=Playfair+Display:wght@700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
 </head>
 <body class="powering-on">
   <div class="room" aria-hidden="true">
@@ -356,6 +358,10 @@
               <span class="rk-led"></span>
               <span class="rk-label">KARAOKE</span>
             </button>
+            <button class="rocker" id="crossfadeBtn" aria-pressed="false" title="Crossfade between tracks">
+              <span class="rk-led"></span>
+              <span class="rk-label">CROSSFADE</span>
+            </button>
           </div>
 
           <div class="serigrafia" aria-hidden="true">
@@ -399,6 +405,13 @@
           <span class="ti-count" id="trackCount">0 RECORDS</span>
         </div>
         <div class="ti-actions">
+          <input id="searchInput" class="btn-mech ti-search" type="search" placeholder="SEARCH..." aria-label="Search tracks" />
+          <select id="sortSelect" class="btn-mech ti-sort" aria-label="Sort tracks">
+            <option value="order">SORT: ORDER</option>
+            <option value="title">SORT: TITLE</option>
+            <option value="artist">SORT: ARTIST</option>
+            <option value="duration">SORT: DURATION</option>
+          </select>
           <label class="btn-mech" for="fileInput">
             <span>+ LOAD</span>
           </label>
@@ -424,6 +437,7 @@
   </main>
 
   <audio id="audio" preload="metadata" crossorigin="anonymous"></audio>
+  <audio id="audioB" preload="metadata" crossorigin="anonymous"></audio>
   <script src="script.js"></script>
 </body>
 </html>

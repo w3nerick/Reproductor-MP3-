@@ -2622,3 +2622,74 @@ body.power-on .plinth {
   .eq-presets { justify-content: center; }
   .eq-preset { font-size: 7px; padding: 4px 6px 4px 16px; }
 }
+
+
+/* ============================================================
+   PLAYLIST SEARCH + SORT (consistent with .btn-mech cream/metal)
+   ============================================================ */
+.ti-search,
+.ti-sort {
+  font-family: "Inter", sans-serif;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  color: var(--ink);
+  cursor: text;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+.ti-search {
+  width: 160px;
+  cursor: text;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.ti-search:focus,
+.ti-sort:focus {
+  outline: none;
+  background-image: linear-gradient(180deg, var(--cream-1) 0%, var(--metal-1) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 0 0 2px rgba(255, 174, 61, 0.45);
+}
+.ti-search::placeholder { color: rgba(26, 18, 8, 0.45); letter-spacing: 1.5px; }
+.ti-sort {
+  cursor: pointer;
+  text-transform: uppercase;
+  background-image:
+    linear-gradient(180deg, var(--metal-1) 0%, var(--metal-2) 100%);
+  padding-right: 24px;
+  appearance: none;
+  -webkit-appearance: none;
+}
+@media (max-width: 760px) {
+  .ti-search { width: 110px; font-size: 9px; }
+}
+
+/* ============================================================
+   PLAYLIST DRAG & DROP
+   ============================================================ */
+.tl-item.is-dragging {
+  opacity: 0.42;
+  outline: 1px dashed rgba(255, 174, 61, 0.55);
+}
+.tl-item.is-drop-above {
+  box-shadow: inset 0 3px 0 0 var(--accent-led, #ffae3d);
+}
+.tl-item.is-drop-below {
+  box-shadow: inset 0 -3px 0 0 var(--accent-led, #ffae3d);
+}
+.tl-item[draggable="true"] {
+  cursor: grab;
+}
+.tl-item[draggable="true"]:active {
+  cursor: grabbing;
+}
+.track-list.no-reorder .tl-item {
+  cursor: pointer;
+}
+
+/* ============================================================
+   POWER-ON CALIBRATION KICK + SPECTRUM SWEEP
+   ============================================================ */
+.spectrum.is-calibrating { filter: brightness(1.15) saturate(1.2); }
