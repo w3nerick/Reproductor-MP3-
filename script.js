@@ -38,6 +38,7 @@
   const nextBtn   = $("nextBtn");
   const shuffleBtn = $("shuffleBtn");
   const repeatBtn  = $("repeatBtn");
+  const sfxBtn     = $("sfxBtn");
 
   const volumeKnob  = $("volumeKnob");
   const volumeValue = $("volumeValue");
@@ -114,6 +115,7 @@
   ];
   let currentStationId = null;
   let savedLibraryIndex = -1;  // last library track when switching to radio
+  let powerOnPlayed = false;   // play the power-on hum only once per session
 
   // Knob range
   const KNOB_MIN = -135;
@@ -168,6 +170,233 @@
       console.warn("AudioContext unavailable:", err);
     }
   }
+
+  /* =========================================================
+     2b. SFX — procedural mechanical sound effects
+         All generated with Web Audio (no external samples).
+     ========================================================= */
+  const sfx = {
+    enabled: true,
+    crackleSrc: null,
+    crackleGain: null,
+    masterGain: null,
+
+    // Build a master gain so sfx volume scales with the volume knob (-6 dB).
+    ensureBus() {
+      if (!audioCtx || sfx.masterGain) return;
+      sfx.masterGain = audioCtx.createGain();
+      sfx.masterGain.gain.value = 0.5;
+      sfx.masterGain.connect(audioCtx.destination);
+    },
+
+    // Short mechanical button click. Two flavors: hi (transport) and lo (toggle).
+    click(variant = "hi", level = 0.35) {
+      if (!sfx.enabled) return;
+      ensureAudioGraph();
+      if (!audioCtx) return;
+      sfx.ensureBus();
+      const sr = audioCtx.sampleRate;
+      const dur = 0.04;
+      const buf = audioCtx.createBuffer(1, Math.floor(sr * dur), sr);
+      const data = buf.getChannelData(0);
+      // Fast-decaying noise burst
+      for (let i = 0; i < data.length; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (sr * 0.005));
+      }
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf;
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = "bandpass";
+      filter.frequency.value = variant === "hi" ? 3500 : 1200;
+      filter.Q.value = 2.5;
+      const g = audioCtx.createGain();
+      g.gain.value = level;
+      src.connect(filter).connect(g).connect(sfx.masterGain);
+      src.start();
+      src.stop(audioCtx.currentTime + dur + 0.02);
+    },
+
+    // Soft tactile click for swatches / preset buttons (very gentle).
+    tap() {
+      if (!sfx.enabled) return;
+      ensureAudioGraph();
+      if (!audioCtx) return;
+      sfx.ensureBus();
+      const osc = audioCtx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(2200, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.03);
+      const g = audioCtx.createGain();
+      g.gain.setValueAtTime(0.18, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.05);
+      osc.connect(g).connect(sfx.masterGain);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.06);
+    },
+
+    // Stylus dropping onto the record: low thump + scratchy noise burst.
+    stylusDrop() {
+      if (!sfx.enabled) return;
+      ensureAudioGraph();
+      if (!audioCtx) return;
+      sfx.ensureBus();
+      const now = audioCtx.currentTime;
+      // 1) Sub thump
+      const osc = audioCtx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(90, now);
+      osc.frequency.exponentialRampToValueAtTime(40, now + 0.12);
+      const og = audioCtx.createGain();
+      og.gain.setValueAtTime(0.6, now);
+      og.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+      osc.connect(og).connect(sfx.masterGain);
+      osc.start(now);
+      osc.stop(now + 0.2);
+
+      // 2) Scratchy contact (band-limited noise that fades into the crackle)
+      const sr = audioCtx.sampleRate;
+      const dur = 0.18;
+      const buf = audioCtx.createBuffer(1, Math.floor(sr * dur), sr);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) {
+        const env = 1 - i / data.length;
+        data[i] = (Math.random() * 2 - 1) * env * env;
+      }
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf;
+      const fil = audioCtx.createBiquadFilter();
+      fil.type = "bandpass";
+      fil.frequency.value = 2400;
+      fil.Q.value = 1.2;
+      const g = audioCtx.createGain();
+      g.gain.value = 0.35;
+      src.connect(fil).connect(g).connect(sfx.masterGain);
+      src.start(now);
+    },
+
+    // Servo motor whoosh while the tonearm moves.
+    // direction = 1 (lowering / start) or -1 (lifting / stop)
+    servo(direction = 1) {
+      if (!sfx.enabled) return;
+      ensureAudioGraph();
+      if (!audioCtx) return;
+      sfx.ensureBus();
+      const now = audioCtx.currentTime;
+      const startF = direction > 0 ? 220 : 380;
+      const endF   = direction > 0 ? 380 : 180;
+      const osc = audioCtx.createOscillator();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(startF, now);
+      osc.frequency.exponentialRampToValueAtTime(endF, now + 0.32);
+      const lp = audioCtx.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.frequency.value = 900;
+      lp.Q.value = 0.6;
+      const g = audioCtx.createGain();
+      g.gain.setValueAtTime(0, now);
+      g.gain.linearRampToValueAtTime(0.06, now + 0.06);
+      g.gain.linearRampToValueAtTime(0, now + 0.34);
+      osc.connect(lp).connect(g).connect(sfx.masterGain);
+      osc.start(now);
+      osc.stop(now + 0.36);
+    },
+
+    // Brief electrical hum on first power-on (first play of the session).
+    powerOn() {
+      if (!sfx.enabled) return;
+      ensureAudioGraph();
+      if (!audioCtx) return;
+      sfx.ensureBus();
+      const now = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = 120; // 60 Hz × 2 (typical mains hum harmonic)
+      const osc2 = audioCtx.createOscillator();
+      osc2.type = "sine";
+      osc2.frequency.value = 240;
+      const g = audioCtx.createGain();
+      g.gain.setValueAtTime(0, now);
+      g.gain.linearRampToValueAtTime(0.05, now + 0.06);
+      g.gain.linearRampToValueAtTime(0, now + 0.45);
+      const g2 = audioCtx.createGain();
+      g2.gain.value = 0.015;
+      osc.connect(g).connect(sfx.masterGain);
+      osc2.connect(g2).connect(g);
+      osc.start(now); osc2.start(now);
+      osc.stop(now + 0.5); osc2.stop(now + 0.5);
+    },
+
+    // Continuous vinyl crackle loop (background hiss + occasional pops).
+    startCrackle() {
+      if (!sfx.enabled) return;
+      ensureAudioGraph();
+      if (!audioCtx || sfx.crackleSrc) return;
+      sfx.ensureBus();
+
+      const sr = audioCtx.sampleRate;
+      // 4-second loop is long enough to feel non-repetitive
+      const buf = audioCtx.createBuffer(1, sr * 4, sr);
+      const data = buf.getChannelData(0);
+      // Pink-ish noise approximation (Voss-McCartney lite) + sparse pops.
+      let b0 = 0, b1 = 0, b2 = 0;
+      for (let i = 0; i < data.length; i++) {
+        const white = Math.random() * 2 - 1;
+        b0 = 0.99765 * b0 + white * 0.0990460;
+        b1 = 0.96300 * b1 + white * 0.2965164;
+        b2 = 0.57000 * b2 + white * 1.0526913;
+        let v = (b0 + b1 + b2 + white * 0.1848) * 0.05;
+        // Sparse pops (~2 per second on average)
+        if (Math.random() < 0.00005) {
+          v += (Math.random() * 2 - 1) * 0.6;
+        }
+        data[i] = v;
+      }
+
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+
+      // Subtle band-pass to give it that "vinyl surface" character
+      const hp = audioCtx.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.value = 600;
+      const lp = audioCtx.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.frequency.value = 7000;
+
+      const g = audioCtx.createGain();
+      const now = audioCtx.currentTime;
+      g.gain.setValueAtTime(0, now);
+      g.gain.linearRampToValueAtTime(0.16, now + 0.4);
+
+      src.connect(hp).connect(lp).connect(g).connect(sfx.masterGain);
+      src.start();
+
+      sfx.crackleSrc = src;
+      sfx.crackleGain = g;
+    },
+
+    stopCrackle() {
+      if (!sfx.crackleSrc || !audioCtx) return;
+      const src = sfx.crackleSrc;
+      const g = sfx.crackleGain;
+      const now = audioCtx.currentTime;
+      g.gain.cancelScheduledValues(now);
+      g.gain.setValueAtTime(g.gain.value, now);
+      g.gain.linearRampToValueAtTime(0, now + 0.35);
+      setTimeout(() => { try { src.stop(); src.disconnect(); } catch {} }, 450);
+      sfx.crackleSrc = null;
+      sfx.crackleGain = null;
+    },
+
+    setEnabled(on) {
+      sfx.enabled = !!on;
+      if (!on) sfx.stopCrackle();
+    },
+  };
+  // Expose for debugging if the user wants to tweak SFX volume from the console.
+  // Example: window.__sfx.masterGain.gain.value = 0.3;
+  Object.defineProperty(window, "__sfx", { value: sfx, writable: false });
 
   /* =========================================================
      3. UTILITIES
@@ -365,6 +594,7 @@
         currentMode,
         currentStationId,
         eq: { ...eqState },
+        sfxEnabled: sfx.enabled,
       };
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(data));
     } catch {}
@@ -390,7 +620,7 @@
     saveSettings();
   }
   themeSwatches.forEach((s) => {
-    s.addEventListener("click", () => setTheme(s.dataset.theme));
+    s.addEventListener("click", () => { sfx.tap(); setTheme(s.dataset.theme); });
   });
 
   /* =========================================================
@@ -770,9 +1000,10 @@
     if (p && p.then) p.catch(() => { /* needs gesture */ });
   }
   function pause() { audio.pause(); }
-  function togglePlay() { audio.paused ? play() : pause(); }
+  function togglePlay() { sfx.click("hi", 0.5); audio.paused ? play() : pause(); }
 
   function next() {
+    sfx.click("hi", 0.4);
     if (currentMode === "radio") return tuneNextStation(1);
     if (!tracks.length) return;
     let i;
@@ -785,6 +1016,7 @@
     loadTrack(i, true);
   }
   function prev() {
+    sfx.click("hi", 0.4);
     if (currentMode === "radio") return tuneNextStation(-1);
     if (!tracks.length) return;
     if (audio.currentTime > 3) { audio.currentTime = 0; return; }
@@ -802,6 +1034,24 @@
     tonearm.classList.toggle("is-playing", playing);
     cueingLever.classList.toggle("is-down", playing);
     if (playing) powerLed.classList.add("is-on");
+
+    // === SFX hooks ===
+    if (playing) {
+      // First play of the session: brief electrical hum.
+      if (!powerOnPlayed) { sfx.powerOn(); powerOnPlayed = true; }
+      // Tonearm servo + stylus drop, only meaningful for library mode.
+      // Skip the "drop" theatrics on radio, but still play servo whoosh.
+      sfx.servo(1);
+      if (currentMode !== "radio") {
+        // Drop slightly after the servo finishes, like a real tonearm.
+        setTimeout(() => { sfx.stylusDrop(); sfx.startCrackle(); }, 280);
+      } else {
+        sfx.startCrackle(); // soft "tape hiss" feel for radio too
+      }
+    } else {
+      sfx.servo(-1);   // tonearm lifting
+      sfx.stopCrackle();
+    }
   }
 
   /* =========================================================
@@ -811,6 +1061,7 @@
     isShuffle = !isShuffle;
     shuffleBtn.classList.toggle("is-active", isShuffle);
     shuffleBtn.setAttribute("aria-pressed", String(isShuffle));
+    sfx.click("lo", 0.3);
     saveSettings();
   }
   function cycleRepeat() {
@@ -819,6 +1070,7 @@
     repeatBtn.classList.toggle("is-active", repeatMode !== "off");
     repeatBtn.setAttribute("aria-pressed", String(repeatMode !== "off"));
     audio.loop = repeatMode === "one";
+    sfx.click("lo", 0.3);
     saveSettings();
   }
 
@@ -927,6 +1179,7 @@
      ========================================================= */
   speedBtns.forEach((btn) => {
     btn.addEventListener("click", () => {
+      sfx.click("lo", 0.35);
       speedBtns.forEach((b) => { b.classList.remove("is-active"); b.setAttribute("aria-pressed", "false"); });
       btn.classList.add("is-active");
       btn.setAttribute("aria-pressed", "true");
@@ -983,6 +1236,17 @@
   shuffleBtn.addEventListener("click", toggleShuffle);
   repeatBtn.addEventListener("click", cycleRepeat);
   cueingLever.addEventListener("click", togglePlay);
+
+  // SFX toggle button: on/off + click feedback (only when turning on, since
+  // turning off shouldn't make a noise — that would be ironic).
+  sfxBtn.addEventListener("click", () => {
+    const newState = !sfx.enabled;
+    if (newState) sfx.click("hi", 0.4);
+    sfx.setEnabled(newState);
+    sfxBtn.classList.toggle("is-active", newState);
+    sfxBtn.setAttribute("aria-pressed", String(newState));
+    saveSettings();
+  });
 
   progressBar.addEventListener("keydown", (e) => {
     if (currentMode === "radio") return;
@@ -1057,7 +1321,7 @@
     deckActions.hidden = tabName !== "library";
   }
   deckTabs.forEach((t) => {
-    t.addEventListener("click", () => setActiveTab(t.dataset.tab));
+    t.addEventListener("click", () => { sfx.tap(); setActiveTab(t.dataset.tab); });
   });
 
   /* =========================================================
@@ -1305,7 +1569,7 @@
   // Bind eq presets
   eqPresetEl.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-preset]");
-    if (btn) applyPreset(btn.dataset.preset);
+    if (btn) { sfx.tap(); applyPreset(btn.dataset.preset); }
   });
 
   /* =========================================================
@@ -1371,6 +1635,11 @@
         setEqBand("low",  settings.eq.low  || 0);
         setEqBand("mid",  settings.eq.mid  || 0);
         setEqBand("high", settings.eq.high || 0);
+      }
+      if (settings.sfxEnabled === false) {
+        sfx.setEnabled(false);
+        sfxBtn.classList.remove("is-active");
+        sfxBtn.setAttribute("aria-pressed", "false");
       }
     } else {
       setVolume(0.8, false);
