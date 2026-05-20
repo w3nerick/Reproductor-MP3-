@@ -23,6 +23,7 @@
   const $ = (id) => document.getElementById(id);
 
   const audio        = $("audio");
+  const audioB       = $("audioB");
   const vinyl        = $("vinyl");
   const tonearm      = $("tonearm");
   const cueingLever  = $("cueingLever");
@@ -83,6 +84,9 @@
   const hiFilterBtn   = $("hiFilterBtn");
   const warmBtn       = $("warmBtn");
   const karaokeBtn    = $("karaokeBtn");
+  const crossfadeBtn  = $("crossfadeBtn");
+  const searchInput   = $("searchInput");
+  const sortSelect    = $("sortSelect");
   const themeButtons  = document.querySelectorAll(".theme-btn");
   const tunerPanel    = $("tunerPanel");
   const tunerDisplay  = $("tunerDisplay");
@@ -111,6 +115,9 @@
   const KNOB_MIN = -135;
   const KNOB_MAX = 135;
 
+  /* Forward-declared by persistence module below. */
+  let schedulePersist = () => {};
+
   /* ---------- Lazy Web Audio graph ---------- */
   let audioCtx = null, mediaSource = null, analyser = null;
   let timeData = null, freqData = null;
@@ -123,6 +130,10 @@
   let widthSplitter = null, widthMerger = null, widthSideGain = null;
   /* Karaoke voice-cancel nodes (parallel path with wet/dry mix) */
   let karaokeWetGain = null, karaokeDryGain = null;
+  /* Crossfade nodes — gainA in front of preGain feeds the main audio element;
+     gainB is reserved for the secondary audio element (lazy mediaSourceB). */
+  let gainA = null, gainB = null;
+  let mediaSourceB = null;
 
   function makeIdentityCurve(n = 4096) {
     const c = new Float32Array(n);
@@ -170,6 +181,12 @@
       mediaSource = audioCtx.createMediaElementSource(audio);
 
       preGain = audioCtx.createGain(); preGain.gain.value = 1;
+
+      /* Crossfade gains: gainA on the main element, gainB reserved for audioB.
+         Default state: gainA=1 (audio plays normally), gainB=0 (audioB silent). */
+      gainA = audioCtx.createGain(); gainA.gain.value = 1;
+      gainB = audioCtx.createGain(); gainB.gain.value = 0;
+      gainB.connect(preGain);
 
       bassShelf = audioCtx.createBiquadFilter();
       bassShelf.type = "lowshelf";
@@ -231,7 +248,8 @@
       freqData = new Uint8Array(analyser.frequencyBinCount);
 
       /* Wire up the chain */
-      mediaSource.connect(preGain);
+      mediaSource.connect(gainA);
+      gainA.connect(preGain);
       preGain.connect(bassShelf);
       bassShelf.connect(trebleShelf);
       let prev = trebleShelf;
@@ -879,16 +897,41 @@
     if (!tracks.length) {
       playlistEl.innerHTML = "";
       trackCount.textContent = "0 RECORDS";
+      playlistEl.classList.remove("no-reorder");
       return;
     }
+    /* Build a list of underlying indices, possibly filtered/sorted for display. */
+    const q = (searchInput && searchInput.value || "").trim().toLowerCase();
+    const sortMode = (sortSelect && sortSelect.value) || "order";
+    let view = tracks.map((_, i) => i);
+    if (q) {
+      view = view.filter((i) => {
+        const t = tracks[i];
+        return (t.title && t.title.toLowerCase().includes(q)) ||
+               (t.artist && t.artist.toLowerCase().includes(q));
+      });
+    }
+    if (sortMode !== "order") {
+      view.sort((a, b) => {
+        const ta = tracks[a], tb = tracks[b];
+        if (sortMode === "title")    return (ta.title || "").localeCompare(tb.title || "");
+        if (sortMode === "artist")   return (ta.artist || "").localeCompare(tb.artist || "");
+        if (sortMode === "duration") return (ta.duration || 0) - (tb.duration || 0);
+        return 0;
+      });
+    }
+    const reorderable = !q && sortMode === "order";
+    playlistEl.classList.toggle("no-reorder", !reorderable);
+
     const parts = [];
-    for (let i = 0; i < tracks.length; i++) {
+    for (const i of view) {
       const t = tracks[i];
       const num = String(i + 1).padStart(2, "0");
       const dur = t.duration ? fmtTime(t.duration) : "—:—";
       const cls = i === currentIndex ? "tl-item is-current" : "tl-item";
+      const draggable = reorderable ? ' draggable="true"' : "";
       parts.push(
-        `<li class="${cls}" data-index="${i}">` +
+        `<li class="${cls}" data-index="${i}"${draggable}>` +
           `<span class="tl-num">${num}</span>` +
           `<div class="tl-info">` +
             `<div class="tl-title">${escapeHtml(t.title)}</div>` +
@@ -900,8 +943,15 @@
       );
     }
     playlistEl.innerHTML = parts.join("");
-    trackCount.textContent =
-      `${String(tracks.length).padStart(2, "0")} RECORD${tracks.length === 1 ? "" : "S"}`;
+    const total = tracks.length;
+    const visible = view.length;
+    if (q || sortMode !== "order") {
+      trackCount.textContent =
+        `${String(visible).padStart(2, "0")} / ${String(total).padStart(2, "0")} RECORD${total === 1 ? "" : "S"}`;
+    } else {
+      trackCount.textContent =
+        `${String(total).padStart(2, "0")} RECORD${total === 1 ? "" : "S"}`;
+    }
   }
   playlistEl.addEventListener("click", (e) => {
     const removeBtn = e.target.closest("[data-action='remove']");
@@ -911,6 +961,83 @@
     if (removeBtn) { e.stopPropagation(); removeTrack(i); return; }
     loadTrack(i, true);
   });
+
+  /* ---------- Search + Sort ---------- */
+  if (searchInput) {
+    let searchDebounce = 0;
+    searchInput.addEventListener("input", () => {
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(renderPlaylist, 80);
+    });
+  }
+  if (sortSelect) {
+    sortSelect.addEventListener("change", () => { renderPlaylist(); });
+  }
+
+  /* ---------- HTML5 drag & drop reorder ---------- */
+  let dragSrcIndex = -1;
+  playlistEl.addEventListener("dragstart", (e) => {
+    const item = e.target.closest(".tl-item");
+    if (!item || playlistEl.classList.contains("no-reorder")) { e.preventDefault(); return; }
+    dragSrcIndex = Number(item.dataset.index);
+    item.classList.add("is-dragging");
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      try { e.dataTransfer.setData("text/plain", String(dragSrcIndex)); } catch(err) {}
+    }
+  });
+  playlistEl.addEventListener("dragend", () => {
+    playlistEl.querySelectorAll(".is-dragging,.is-drop-above,.is-drop-below").forEach((el) => {
+      el.classList.remove("is-dragging", "is-drop-above", "is-drop-below");
+    });
+    dragSrcIndex = -1;
+  });
+  playlistEl.addEventListener("dragover", (e) => {
+    if (dragSrcIndex < 0 || playlistEl.classList.contains("no-reorder")) return;
+    const item = e.target.closest(".tl-item");
+    if (!item) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    playlistEl.querySelectorAll(".is-drop-above,.is-drop-below").forEach((el) => {
+      el.classList.remove("is-drop-above", "is-drop-below");
+    });
+    const rect = item.getBoundingClientRect();
+    const above = (e.clientY - rect.top) < rect.height / 2;
+    item.classList.add(above ? "is-drop-above" : "is-drop-below");
+  });
+  playlistEl.addEventListener("drop", (e) => {
+    if (dragSrcIndex < 0 || playlistEl.classList.contains("no-reorder")) return;
+    const item = e.target.closest(".tl-item");
+    if (!item) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const dropTargetIndex = Number(item.dataset.index);
+    const rect = item.getBoundingClientRect();
+    const above = (e.clientY - rect.top) < rect.height / 2;
+    let insertAt = above ? dropTargetIndex : dropTargetIndex + 1;
+    reorderTrack(dragSrcIndex, insertAt);
+    dragSrcIndex = -1;
+  });
+
+  function reorderTrack(from, to) {
+    if (from === to || from === to - 1) return;
+    if (from < 0 || from >= tracks.length) return;
+    const moved = tracks.splice(from, 1)[0];
+    if (to > from) to -= 1;
+    if (to < 0) to = 0;
+    if (to > tracks.length) to = tracks.length;
+    tracks.splice(to, 0, moved);
+    /* Keep currentIndex pointing to the same track. */
+    if (currentIndex === from) {
+      currentIndex = to;
+    } else if (from < currentIndex && to >= currentIndex) {
+      currentIndex -= 1;
+    } else if (from > currentIndex && to <= currentIndex) {
+      currentIndex += 1;
+    }
+    renderPlaylist();
+    schedulePersist();
+  }
 
   /* ============================================================
      TRACKS
@@ -1007,6 +1134,7 @@
     powerLed.classList.add("is-on");
     renderPlaylist();
     updateMarquee();
+    if (typeof updateMediaSessionMetadata === "function") updateMediaSessionMetadata();
     if (autoPlay) play();
   }
   function play() {
@@ -1594,8 +1722,14 @@
     }
     next();
   });
-  audio.addEventListener("play",  () => { setPlayingUI(true);  sfx.startCrackle(); quartzLockBlinkAndLock(); });
-  audio.addEventListener("pause", () => { setPlayingUI(false); sfx.stopCrackle();  quartzLockOff(); });
+  audio.addEventListener("play",  () => {
+    setPlayingUI(true);  sfx.startCrackle(); quartzLockBlinkAndLock();
+    setMediaSessionPlaybackState("playing");
+  });
+  audio.addEventListener("pause", () => {
+    setPlayingUI(false); sfx.stopCrackle();  quartzLockOff();
+    setMediaSessionPlaybackState("paused");
+  });
 
   /* ============================================================
      BUTTONS
@@ -1658,6 +1792,349 @@
   });
 
   /* ============================================================
+     CROSSFADE between tracks (A6 audio elements + GainA/GainB ramps)
+     ============================================================ */
+  let crossfadeOn = false;
+  let crossfadeInProgress = false;
+  let crossfadeEndTimer = 0;
+  const CROSSFADE_END_SEC = 4;   // ramp duration when crossfading on track end
+  const CROSSFADE_MANUAL_SEC = 0.5;
+
+  function ensureMediaSourceB() {
+    if (!audioCtx || !gainB) return false;
+    if (mediaSourceB) return true;
+    try {
+      mediaSourceB = audioCtx.createMediaElementSource(audioB);
+      mediaSourceB.connect(gainB);
+      return true;
+    } catch (e) {
+      console.warn("Could not create secondary MediaElementSource:", e);
+      return false;
+    }
+  }
+
+  function rampGains(rampSec) {
+    if (!audioCtx || !gainA || !gainB) return;
+    const t = audioCtx.currentTime;
+    gainA.gain.cancelScheduledValues(t);
+    gainB.gain.cancelScheduledValues(t);
+    gainA.gain.setValueAtTime(gainA.gain.value, t);
+    gainB.gain.setValueAtTime(gainB.gain.value, t);
+    /* gainA: 1 -> 0 ; gainB: 0 -> 1 (audioB is the OUT-going song trail) */
+    gainA.gain.linearRampToValueAtTime(0, t + rampSec);
+    gainB.gain.linearRampToValueAtTime(1, t + rampSec);
+  }
+
+  function finishCrossfade() {
+    if (!audioCtx || !gainA || !gainB) return;
+    const t = audioCtx.currentTime;
+    gainA.gain.cancelScheduledValues(t);
+    gainB.gain.cancelScheduledValues(t);
+    /* Restore the steady state: audio (primary) plays, audioB silenced. */
+    gainA.gain.linearRampToValueAtTime(1, t + 0.05);
+    gainB.gain.linearRampToValueAtTime(0, t + 0.05);
+    try { audioB.pause(); } catch (e) {}
+    crossfadeInProgress = false;
+  }
+
+  function beginCrossfadeTo(nextIndex, rampSec) {
+    if (!tracks.length || nextIndex < 0 || nextIndex >= tracks.length) return false;
+    ensureAudioGraph();
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+    if (!ensureMediaSourceB()) return false;
+
+    /* Move the currently playing audio onto audioB so it can fade out
+       while audio (primary) immediately starts the next track. */
+    try {
+      const curSrc = audio.currentSrc || audio.src;
+      const curTime = audio.currentTime;
+      audioB.src = curSrc;
+      audioB.currentTime = curTime;
+      audioB.volume = 1;
+      const pB = audioB.play();
+      if (pB && pB.then) pB.catch(() => {});
+    } catch (e) { /* ignore */ }
+
+    /* Reset gain state: audioA starts silent, audioB starts loud, then ramp. */
+    if (audioCtx && gainA && gainB) {
+      const t = audioCtx.currentTime;
+      gainA.gain.cancelScheduledValues(t);
+      gainB.gain.cancelScheduledValues(t);
+      gainA.gain.setValueAtTime(0, t);
+      gainB.gain.setValueAtTime(1, t);
+    }
+    crossfadeInProgress = true;
+
+    /* Load and start the next track on the primary element. */
+    currentIndex = nextIndex;
+    const t = tracks[nextIndex];
+    audio.src = t.url;
+    audio.load();
+    ledTitleEl.textContent = `${t.artist.toUpperCase()} — ${t.title.toUpperCase()}`;
+    ledTrackNum.textContent = String(nextIndex + 1).padStart(2, "0");
+    vinylTitle.textContent = t.title;
+    vinylArtist.textContent = t.artist;
+    powerLed.classList.add("is-on");
+    renderPlaylist();
+    updateMarquee();
+    updateMediaSessionMetadata();
+    const pA = audio.play();
+    if (pA && pA.then) pA.catch(() => {});
+
+    rampGains(rampSec);
+    clearTimeout(crossfadeEndTimer);
+    crossfadeEndTimer = setTimeout(finishCrossfade, Math.ceil(rampSec * 1000) + 60);
+    return true;
+  }
+
+  function tryCrossfadeOnEnd() {
+    if (!crossfadeOn || crossfadeInProgress) return false;
+    if (!tracks.length) return false;
+    if (currentSource === "tuner") return false;
+    if (audio.paused || !isFinite(audio.duration)) return false;
+    const remaining = audio.duration - audio.currentTime;
+    if (remaining > CROSSFADE_END_SEC || remaining <= 0) return false;
+    /* Determine the next track using the same rules as next(). */
+    let i;
+    if (repeatMode === "one") return false;
+    if (currentIndex === tracks.length - 1 && repeatMode === "off" && !isShuffle) return false;
+    if (isShuffle) {
+      if (tracks.length === 1) return false;
+      do { i = Math.floor(Math.random() * tracks.length); } while (i === currentIndex);
+    } else {
+      i = (currentIndex + 1) % tracks.length;
+    }
+    return beginCrossfadeTo(i, CROSSFADE_END_SEC);
+  }
+
+  audio.addEventListener("timeupdate", () => { tryCrossfadeOnEnd(); });
+
+  /* ============================================================
+     MEDIA SESSION API
+     ============================================================ */
+  const ARTWORK_192 = "icons/icon-192.png";
+  const ARTWORK_512 = "icons/icon-512.png";
+
+  function updateMediaSessionMetadata() {
+    if (!("mediaSession" in navigator)) return;
+    if (currentIndex < 0 || !tracks[currentIndex]) {
+      try { navigator.mediaSession.metadata = null; } catch(e) {}
+      return;
+    }
+    const t = tracks[currentIndex];
+    try {
+      navigator.mediaSession.metadata = new window.MediaMetadata({
+        title: t.title || t.name || "Untitled",
+        artist: t.artist || "Unknown",
+        album: "Velouria 1200",
+        artwork: [
+          { src: ARTWORK_192, sizes: "192x192", type: "image/png" },
+          { src: ARTWORK_512, sizes: "512x512", type: "image/png" },
+        ],
+      });
+    } catch(e) { /* ignore (not all browsers support all features) */ }
+  }
+
+  function setMediaSessionPlaybackState(state) {
+    if (!("mediaSession" in navigator)) return;
+    try { navigator.mediaSession.playbackState = state; } catch(e) {}
+  }
+
+  function setupMediaSessionHandlers() {
+    if (!("mediaSession" in navigator)) return;
+    const setHandler = (action, fn) => {
+      try { navigator.mediaSession.setActionHandler(action, fn); } catch(e) {}
+    };
+    setHandler("play",          () => { play(); });
+    setHandler("pause",         () => { pause(); });
+    setHandler("previoustrack", () => { prev(); });
+    setHandler("nexttrack",     () => { next(); });
+    setHandler("seekto", (e) => {
+      if (e && typeof e.seekTime === "number" && isFinite(audio.duration)) {
+        audio.currentTime = Math.max(0, Math.min(audio.duration, e.seekTime));
+      }
+    });
+    setHandler("seekbackward", (e) => {
+      const off = (e && e.seekOffset) || 10;
+      audio.currentTime = Math.max(0, audio.currentTime - off);
+    });
+    setHandler("seekforward", (e) => {
+      const off = (e && e.seekOffset) || 10;
+      if (isFinite(audio.duration)) {
+        audio.currentTime = Math.min(audio.duration, audio.currentTime + off);
+      }
+    });
+  }
+
+  let lastPositionUpdate = 0;
+  function maybeUpdatePositionState() {
+    if (!("mediaSession" in navigator) || !navigator.mediaSession.setPositionState) return;
+    const now = performance.now();
+    if (now - lastPositionUpdate < 1000) return;
+    lastPositionUpdate = now;
+    if (!isFinite(audio.duration) || audio.duration <= 0) return;
+    try {
+      navigator.mediaSession.setPositionState({
+        duration: audio.duration,
+        position: Math.max(0, Math.min(audio.duration, audio.currentTime || 0)),
+        playbackRate: audio.playbackRate || 1,
+      });
+    } catch(e) {}
+  }
+  audio.addEventListener("timeupdate", maybeUpdatePositionState);
+
+  /* ============================================================
+     CROSSFADE rocker
+     ============================================================ */
+  bindRocker(crossfadeBtn, () => crossfadeOn, (v) => {
+    crossfadeOn = !!v;
+    schedulePersist();
+  });
+
+  /* Hook manual next/prev to use a quick crossfade when enabled. */
+  function manualCrossfadeNext(forwards) {
+    if (!crossfadeOn || crossfadeInProgress) return false;
+    if (!tracks.length || currentIndex < 0) return false;
+    if (currentSource === "tuner") return false;
+    let i;
+    if (forwards) {
+      if (isShuffle) {
+        if (tracks.length === 1) i = 0;
+        else { do { i = Math.floor(Math.random() * tracks.length); } while (i === currentIndex); }
+      } else {
+        i = (currentIndex + 1) % tracks.length;
+      }
+    } else {
+      i = (currentIndex - 1 + tracks.length) % tracks.length;
+    }
+    sfx.transportClick();
+    return beginCrossfadeTo(i, CROSSFADE_MANUAL_SEC);
+  }
+  /* Re-bind the next/prev buttons to use crossfade when enabled. */
+  prevBtn.removeEventListener && prevBtn.removeEventListener("click", prev);
+  nextBtn.removeEventListener && nextBtn.removeEventListener("click", next);
+  prevBtn.addEventListener("click", () => {
+    if (crossfadeOn && audio.currentTime <= 3 && manualCrossfadeNext(false)) return;
+    prev();
+  });
+  nextBtn.addEventListener("click", () => {
+    if (crossfadeOn && manualCrossfadeNext(true)) return;
+    next();
+  });
+
+  /* ============================================================
+     PERSISTENCE — single namespaced key velouria.settings (debounced)
+     ============================================================ */
+  const SETTINGS_KEY = "velouria.settings";
+  let persistTimer = 0;
+  function gatherSettings() {
+    const eqGains = Array.from(eqInputs).map((inp) => Number(inp.value));
+    return {
+      eq: eqGains,
+      eqPreset: activeEqPreset,
+      bass: bassCtrl ? bassCtrl.value : 0,
+      treble: trebleCtrl ? trebleCtrl.value : 0,
+      balance: balanceCtrl ? balanceCtrl.value : 0,
+      reverb: reverbCtrl ? Math.round(reverbCtrl.value) : 0,
+      width: widthCtrl ? widthCtrl.value : 100,
+      loudness: !!loudnessOn,
+      subFilter: !!subFilterOn,
+      hiFilter: !!hiFilterOn,
+      warm: !!warmOn,
+      karaoke: !!karaokeOn,
+      crossfade: !!crossfadeOn,
+      source: currentSource,
+      volume: volume,
+      speedRpm: speedRpm,
+    };
+  }
+  function writeSettings() {
+    try {
+      const payload = JSON.stringify(gatherSettings());
+      localStorage.setItem(SETTINGS_KEY, payload);
+    } catch(e) {}
+  }
+  /* Reassign the forward-declared schedulePersist now that all UI controls exist. */
+  schedulePersist = function () {
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(writeSettings, 300);
+  };
+
+  function readSettings() {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch(e) { return null; }
+  }
+
+  function applyLoadedSettings(s) {
+    if (!s || typeof s !== "object") return;
+    /* EQ bands first (numeric clamps). */
+    if (Array.isArray(s.eq) && s.eq.length === 5) {
+      s.eq.forEach((v, i) => {
+        const inp = eqInputs[i];
+        if (!inp) return;
+        const clamped = Math.max(-12, Math.min(12, Number(v) || 0));
+        inp.value = String(clamped);
+        applyEqBand(i, clamped);
+        updateEqThumb(inp);
+        eqCustomGains[i] = clamped;
+      });
+    }
+    if (s.eqPreset) setEqPresetUI(s.eqPreset);
+    if (typeof s.bass === "number" && bassCtrl) bassCtrl.set(s.bass);
+    if (typeof s.treble === "number" && trebleCtrl) trebleCtrl.set(s.treble);
+    if (typeof s.balance === "number" && balanceCtrl) balanceCtrl.set(s.balance);
+    if (typeof s.reverb === "number" && reverbCtrl) reverbCtrl.set(s.reverb);
+    if (typeof s.width === "number" && widthCtrl) widthCtrl.set(s.width);
+    if (typeof s.volume === "number") setVolume(s.volume);
+    if (typeof s.speedRpm === "number" && (s.speedRpm === 33 || s.speedRpm === 45)) {
+      speedRpm = s.speedRpm;
+      speedBtns.forEach((b) => {
+        const on = Number(b.dataset.speed) === speedRpm;
+        b.classList.toggle("is-active", on);
+        b.setAttribute("aria-pressed", String(on));
+      });
+      setSpinDuration();
+    }
+    if (s.loudness)  { loudnessOn = true;  loudnessBtn.classList.add("is-active");  loudnessBtn.setAttribute("aria-pressed","true");  applyLoudness(true); }
+    if (s.subFilter) { subFilterOn = true; subFilterBtn.classList.add("is-active"); subFilterBtn.setAttribute("aria-pressed","true"); applySubFilter(true); }
+    if (s.hiFilter)  { hiFilterOn = true;  hiFilterBtn.classList.add("is-active");  hiFilterBtn.setAttribute("aria-pressed","true");  applyHiFilter(true); }
+    if (s.warm)      { warmOn = true;      warmBtn.classList.add("is-active");      warmBtn.setAttribute("aria-pressed","true");      applyWarm(true); wfStart = performance.now(); }
+    if (s.karaoke)   { karaokeOn = true;   karaokeBtn.classList.add("is-active");   karaokeBtn.setAttribute("aria-pressed","true");   applyKaraoke(true); }
+    if (s.crossfade) { crossfadeOn = true; crossfadeBtn.classList.add("is-active"); crossfadeBtn.setAttribute("aria-pressed","true"); }
+    if (s.source && SOURCES.includes(s.source) && s.source !== "phono") {
+      /* Defer source switch slightly so initial render is settled. */
+      setTimeout(() => setSource(s.source), 0);
+    }
+  }
+
+  /* Wire schedulePersist into existing change paths.
+     We don't refactor every callback; instead we listen for a few high-level events. */
+  eqInputs.forEach((inp) => inp.addEventListener("change", schedulePersist));
+  [bassKnob, trebleKnob, balanceKnob, reverbKnob, widthKnob, volumeKnob].forEach((el) => {
+    if (!el) return;
+    el.addEventListener("pointerup", schedulePersist);
+    el.addEventListener("wheel", () => { schedulePersist(); }, { passive: true });
+    el.addEventListener("keyup", schedulePersist);
+  });
+  [loudnessBtn, subFilterBtn, hiFilterBtn, warmBtn, karaokeBtn, crossfadeBtn].forEach((b) => {
+    if (b) b.addEventListener("click", schedulePersist);
+  });
+  speedBtns.forEach((b) => b.addEventListener("click", schedulePersist));
+  sourceBtns.forEach((b) => b.addEventListener("click", schedulePersist));
+
+  /* ============================================================
+     SERVICE WORKER REGISTRATION (PWA)
+     ============================================================ */
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("./service-worker.js").catch(() => {});
+    });
+  }
+
+  /* ============================================================
      INIT
      ============================================================ */
   setupVuMeters();
@@ -1665,28 +2142,35 @@
   setSpinDuration();
   setVolume(volume);
   updateMarquee();
+  setupMediaSessionHandlers();
 
   // Sync SFX button visual with persisted preference
   sfxBtn.classList.toggle("is-active", sfx.enabled);
   sfxBtn.setAttribute("aria-pressed", String(sfx.enabled));
 
-  /* Restore standalone audio prefs (width, karaoke) */
-  try {
-    const savedW = parseFloat(localStorage.getItem("velouria.width"));
-    if (isFinite(savedW) && savedW >= 0 && savedW <= 2) {
-      widthCtrl.set(Math.round(savedW * 100));
-    }
-  } catch(e) {}
-  try {
-    if (localStorage.getItem("velouria.karaoke") === "true") {
-      karaokeOn = true;
-      karaokeBtn.classList.add("is-active");
-      karaokeBtn.setAttribute("aria-pressed", "true");
-      // applyKaraoke is a no-op until graph exists; first play() will trigger ensureAudioGraph
-      // but we also call it now in case graph already exists.
-      applyKaraoke(true);
-    }
-  } catch(e) {}
+  /* Restore consolidated settings (preferred). Fall back to legacy keys for backwards compat. */
+  const _saved = readSettings();
+  if (_saved) {
+    applyLoadedSettings(_saved);
+  } else {
+    /* Migrate legacy standalone keys (velouria.width, velouria.karaoke, velouria.eqPreset). */
+    try {
+      const savedW = parseFloat(localStorage.getItem("velouria.width"));
+      if (isFinite(savedW) && savedW >= 0 && savedW <= 2 && widthCtrl) {
+        widthCtrl.set(Math.round(savedW * 100));
+      }
+    } catch(e) {}
+    try {
+      if (localStorage.getItem("velouria.karaoke") === "true") {
+        karaokeOn = true;
+        karaokeBtn.classList.add("is-active");
+        karaokeBtn.setAttribute("aria-pressed", "true");
+        applyKaraoke(true);
+      }
+    } catch(e) {}
+    /* Persist a fresh consolidated snapshot now that we've migrated. */
+    writeSettings();
+  }
 
   // Power-on animation: relay thunk after 600ms, full power after 1.2s
   setTimeout(() => {
