@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="walnut">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -10,13 +10,20 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=VT323&family=Playfair+Display:wght@700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body>
+<body class="powering-on">
   <div class="room" aria-hidden="true">
     <div class="room-light"></div>
   </div>
 
+  <!-- ===== Theme switcher ===== -->
+  <div class="theme-switcher" aria-label="Acabado">
+    <button class="theme-btn is-active" data-theme="walnut" title="Walnut · Silver"><span></span>W</button>
+    <button class="theme-btn" data-theme="rosewood" title="Rosewood · Gold"><span></span>R</button>
+    <button class="theme-btn" data-theme="black" title="Black · Wood"><span></span>B</button>
+  </div>
+
   <main class="hifi">
-    <!-- ================= Brand plate ================= -->
+    <!-- ===== Brand plate ===== -->
     <header class="brand">
       <div class="brand-plate">
         <span class="brand-name">VELOURIA</span>
@@ -24,24 +31,26 @@
       </div>
     </header>
 
-    <!-- ================= Turntable ================= -->
+    <!-- ===== Turntable (wrapped in dust cover) ===== -->
     <section class="turntable" aria-label="Tocadiscos">
+      <div class="dust-cover" id="dustCover" aria-hidden="true">
+        <div class="dust-cover-glass"></div>
+        <div class="dust-cover-hinge"></div>
+      </div>
+
       <div class="plinth">
         <div class="deck-top">
-          <!-- Power LED -->
           <div class="cluster cluster-power">
             <div class="led-dot" id="powerLed" aria-hidden="true"></div>
             <span class="cluster-label">POWER</span>
           </div>
 
-          <!-- Speed buttons 33 / 45 -->
           <div class="cluster cluster-speed">
             <button class="speed-btn is-active" data-speed="33" aria-pressed="true">33</button>
             <button class="speed-btn" data-speed="45" aria-pressed="false">45</button>
             <span class="cluster-label">RPM</span>
           </div>
 
-          <!-- Platter well with strobe ring + vinyl -->
           <div class="platter-well">
             <div class="strobe-ring" aria-hidden="true"></div>
             <div class="platter" id="platter">
@@ -49,6 +58,9 @@
                 <div class="vinyl" id="vinyl">
                   <div class="vinyl-grooves"></div>
                   <div class="vinyl-shine"></div>
+                  <div class="vinyl-dust" aria-hidden="true">
+                    <span></span><span></span><span></span><span></span><span></span><span></span>
+                  </div>
                   <div class="vinyl-label">
                     <div class="label-ring"></div>
                     <div class="label-text">
@@ -62,23 +74,33 @@
             </div>
           </div>
 
-          <!-- Tonearm assembly -->
           <div class="tonearm-mount">
             <div class="tonearm-pivot"></div>
-            <div class="tonearm" id="tonearm">
-              <div class="tonearm-counterweight"></div>
+            <div class="tonearm" id="tonearm" tabindex="0" role="button" aria-label="Tonearm">
+              <div class="tonearm-counterweight">
+                <div class="cw-marks" aria-hidden="true">
+                  <span></span><span></span><span></span><span></span><span></span><span></span>
+                </div>
+              </div>
               <div class="tonearm-tube"></div>
               <div class="tonearm-headshell"></div>
             </div>
+            <div class="tonearm-rest" aria-hidden="true"></div>
           </div>
 
-          <!-- Cueing lever -->
           <div class="cueing">
             <span class="cueing-label">CUE</span>
             <div class="cueing-lever" id="cueingLever"></div>
           </div>
 
-          <!-- Pitch fader (decorative) -->
+          <div class="anti-skating" aria-hidden="true">
+            <span class="as-label">ANTI<br>SKATE</span>
+            <div class="as-knob" id="antiSkatingKnob"></div>
+            <div class="as-marks">
+              <span>0</span><span>1</span><span>2</span><span>3</span>
+            </div>
+          </div>
+
           <div class="pitch-fader" aria-hidden="true">
             <span class="pitch-label">PITCH</span>
             <div class="pitch-track">
@@ -92,11 +114,10 @@
       </div>
     </section>
 
-    <!-- ================= Amplifier / receiver ================= -->
+    <!-- ===== Amplifier / receiver ===== -->
     <section class="amp" aria-label="Amplificador">
       <div class="amp-case">
         <div class="amp-face">
-          <!-- VU meters (stereo) -->
           <div class="vu-section">
             <div class="vu-meter">
               <canvas class="vu-canvas" data-channel="L"></canvas>
@@ -108,7 +129,6 @@
             </div>
           </div>
 
-          <!-- LED amber display -->
           <div class="led-display">
             <div class="led-window">
               <div class="led-row led-row-top">
@@ -116,6 +136,7 @@
                 <div class="led-marquee">
                   <span class="led-title" id="ledTitle">— NO TRACK LOADED —</span>
                 </div>
+                <span class="led-source-tag" id="ledSourceTag">PHONO</span>
               </div>
               <div class="led-row led-row-bottom">
                 <span class="led-time" id="ledCurrentTime">0:00</span>
@@ -128,19 +149,18 @@
             </div>
           </div>
 
-          <!-- Transport buttons -->
           <div class="transport">
             <button class="tx-btn" id="prevBtn" aria-label="Anterior">
-              <span class="tx-icon">◄◄</span>
+              <span class="tx-icon">&#9668;&#9668;</span>
               <span class="tx-text">PREV</span>
             </button>
             <button class="tx-btn tx-play" id="playBtn" aria-label="Reproducir">
-              <span class="tx-icon" id="iconPlay">▶</span>
-              <span class="tx-icon" id="iconPause" hidden>❚❚</span>
+              <span class="tx-icon" id="iconPlay">&#9654;</span>
+              <span class="tx-icon" id="iconPause" hidden>&#10074;&#10074;</span>
               <span class="tx-text" id="playLabel">PLAY</span>
             </button>
             <button class="tx-btn" id="nextBtn" aria-label="Siguiente">
-              <span class="tx-icon">►►</span>
+              <span class="tx-icon">&#9658;&#9658;</span>
               <span class="tx-text">NEXT</span>
             </button>
             <button class="tx-btn tx-toggle" id="shuffleBtn" aria-pressed="false">
@@ -151,13 +171,12 @@
               <span class="tx-text">RPT</span>
               <span class="tx-led"></span>
             </button>
-            <button class="tx-btn tx-toggle is-active" id="sfxBtn" aria-pressed="true" title="Efectos de tocadiscos (clicks, plop, vinilo)">
+            <button class="tx-btn tx-toggle is-active" id="sfxBtn" aria-pressed="true" title="Efectos de tocadiscos">
               <span class="tx-text">SFX</span>
               <span class="tx-led"></span>
             </button>
           </div>
 
-          <!-- Volume knob -->
           <div class="knob-cluster">
             <div class="knob"
                  id="volumeKnob"
@@ -180,7 +199,177 @@
       </div>
     </section>
 
-    <!-- ================= Track index ================= -->
+    <!-- ===== Preamp / Tone control center ===== -->
+    <section class="preamp" aria-label="Preamplificador">
+      <div class="preamp-case">
+
+        <!-- Top row: Tape counter | Spectrum analyzer | Quartz lock -->
+        <div class="preamp-row preamp-top">
+          <div class="tape-counter">
+            <span class="tc-label">COUNT</span>
+            <span class="tc-display" id="tapeCounter">0000</span>
+          </div>
+
+          <div class="spectrum-wrap">
+            <span class="spectrum-label">SPECTRUM ANALYZER</span>
+            <canvas class="spectrum" id="spectrum" width="640" height="120"></canvas>
+            <div class="spectrum-scale" aria-hidden="true">
+              <span>30</span><span>100</span><span>300</span><span>1k</span><span>3k</span><span>10k</span><span>16k</span>
+              <span class="spectrum-units">Hz</span>
+            </div>
+          </div>
+
+          <div class="quartz-lock">
+            <div class="ql-led" id="quartzLed"></div>
+            <span class="ql-label">QUARTZ<br>LOCK</span>
+          </div>
+        </div>
+
+        <!-- Middle row: 5-band EQ + Tone knobs -->
+        <div class="preamp-row preamp-mid">
+          <div class="eq-bands">
+            <span class="eq-title">5-BAND GRAPHIC EQUALIZER</span>
+            <div class="eq-sliders">
+              <div class="eq-slider">
+                <input type="range" min="-12" max="12" value="0" step="1" data-band="0" aria-label="60 Hz" />
+                <span class="eq-freq">60</span>
+              </div>
+              <div class="eq-slider">
+                <input type="range" min="-12" max="12" value="0" step="1" data-band="1" aria-label="250 Hz" />
+                <span class="eq-freq">250</span>
+              </div>
+              <div class="eq-slider">
+                <input type="range" min="-12" max="12" value="0" step="1" data-band="2" aria-label="1 kHz" />
+                <span class="eq-freq">1k</span>
+              </div>
+              <div class="eq-slider">
+                <input type="range" min="-12" max="12" value="0" step="1" data-band="3" aria-label="4 kHz" />
+                <span class="eq-freq">4k</span>
+              </div>
+              <div class="eq-slider">
+                <input type="range" min="-12" max="12" value="0" step="1" data-band="4" aria-label="12 kHz" />
+                <span class="eq-freq">12k</span>
+              </div>
+            </div>
+            <div class="eq-scale" aria-hidden="true">
+              <span>+12</span><span>+6</span><span>0</span><span>-6</span><span>-12</span>
+              <span class="eq-units">dB</span>
+            </div>
+          </div>
+
+          <div class="tone-knobs">
+            <div class="tone-knob">
+              <div class="tk-knob" id="bassKnob" role="slider" aria-label="Bass" aria-valuemin="-12" aria-valuemax="12" aria-valuenow="0" tabindex="0">
+                <div class="tk-dial"></div>
+                <div class="tk-indicator"></div>
+              </div>
+              <span class="tk-label">BASS</span>
+              <span class="tk-value" data-knob="bass">0</span>
+            </div>
+            <div class="tone-knob">
+              <div class="tk-knob" id="trebleKnob" role="slider" aria-label="Treble" aria-valuemin="-12" aria-valuemax="12" aria-valuenow="0" tabindex="0">
+                <div class="tk-dial"></div>
+                <div class="tk-indicator"></div>
+              </div>
+              <span class="tk-label">TREBLE</span>
+              <span class="tk-value" data-knob="treble">0</span>
+            </div>
+            <div class="tone-knob">
+              <div class="tk-knob" id="balanceKnob" role="slider" aria-label="Balance" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+                <div class="tk-dial"></div>
+                <div class="tk-indicator"></div>
+              </div>
+              <span class="tk-label">BALANCE</span>
+              <span class="tk-value" data-knob="balance">C</span>
+            </div>
+            <div class="tone-knob tone-knob-detents">
+              <div class="tk-knob" id="reverbKnob" role="slider" aria-label="Reverb" aria-valuemin="0" aria-valuemax="3" aria-valuenow="0" tabindex="0" data-detents="4">
+                <div class="tk-dial"></div>
+                <div class="tk-indicator"></div>
+              </div>
+              <span class="tk-label">REVERB</span>
+              <span class="tk-value" data-knob="reverb">OFF</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bottom row: Source selector + filter switches + serigrafía -->
+        <div class="preamp-row preamp-bot">
+          <div class="source-selector">
+            <span class="src-title">INPUT SELECTOR</span>
+            <div class="src-knob-wrap">
+              <div class="src-knob" id="sourceKnob"
+                   role="slider"
+                   aria-label="Input source"
+                   aria-valuemin="0"
+                   aria-valuemax="3"
+                   aria-valuenow="0"
+                   tabindex="0">
+                <div class="src-dial"></div>
+                <div class="src-indicator"></div>
+              </div>
+              <div class="src-positions">
+                <button class="src-btn is-active" data-source="phono"><span class="src-led"></span><span class="src-name">PHONO</span></button>
+                <button class="src-btn" data-source="tuner"><span class="src-led"></span><span class="src-name">TUNER</span></button>
+                <button class="src-btn" data-source="aux"><span class="src-led"></span><span class="src-name">AUX</span></button>
+                <button class="src-btn" data-source="tape"><span class="src-led"></span><span class="src-name">TAPE</span></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="filter-switches">
+            <button class="rocker" id="loudnessBtn" aria-pressed="false">
+              <span class="rk-led"></span>
+              <span class="rk-label">LOUDNESS</span>
+            </button>
+            <button class="rocker" id="subFilterBtn" aria-pressed="false">
+              <span class="rk-led"></span>
+              <span class="rk-label">SUB&nbsp;FILTER</span>
+            </button>
+            <button class="rocker" id="hiFilterBtn" aria-pressed="false">
+              <span class="rk-led"></span>
+              <span class="rk-label">HI&nbsp;FILTER</span>
+            </button>
+            <button class="rocker" id="warmBtn" aria-pressed="false" title="Tape saturation + wow &amp; flutter">
+              <span class="rk-led"></span>
+              <span class="rk-label">WARM&nbsp;TAPE</span>
+            </button>
+          </div>
+
+          <div class="serigrafia" aria-hidden="true">
+            <span class="serig-line"><span class="serig-mark">DOLBY NR</span><span class="serig-dot">&middot;</span><span class="serig-mark">STEREO</span></span>
+            <span class="serig-line">DIRECT-DRIVE QUARTZ-PLL</span>
+            <span class="serig-serial">S/N V1200-MCMLXXXV-0042</span>
+          </div>
+        </div>
+
+        <!-- Tuner panel (only visible when source = TUNER) -->
+        <div class="tuner-panel" id="tunerPanel" hidden>
+          <span class="tuner-title">FM STEREO TUNER</span>
+          <div class="tuner-display" id="tunerDisplay">88.5 MHz</div>
+          <div class="tuner-bar" aria-hidden="true">
+            <span class="tuner-band">88</span>
+            <div class="tuner-track"><div class="tuner-needle" id="tunerNeedle"></div></div>
+            <span class="tuner-band">108</span>
+          </div>
+          <div class="tuner-dial-wrap">
+            <span class="tuner-dial-label">TUNING</span>
+            <div class="tuner-dial" id="tunerDial" role="slider"
+                 aria-label="FM Tuning"
+                 aria-valuemin="88"
+                 aria-valuemax="108"
+                 aria-valuenow="88.5"
+                 tabindex="0">
+              <div class="td-dial"></div>
+              <div class="td-indicator"></div>
+            </div>
+          </div>
+          <div class="tuner-stereo-led" id="tunerStereoLed">STEREO</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Track index ===== -->
     <section class="track-index" aria-label="Lista de reproducción">
       <header class="ti-head">
         <div class="ti-title">
@@ -198,7 +387,7 @@
 
       <div class="dropzone" id="dropzone">
         <div class="dz-inner">
-          <span class="dz-icon">♫</span>
+          <span class="dz-icon">&#9836;</span>
           <p>DROP YOUR MP3 RECORDS HERE</p>
           <small>or use the LOAD button above</small>
         </div>
@@ -208,7 +397,7 @@
     </section>
 
     <footer class="foot">
-      <span>HAND-CRAFTED · VELOURIA AUDIO LTD. · MCMLXXXV</span>
+      <span>HAND-CRAFTED &middot; VELOURIA AUDIO LTD. &middot; MCMLXXXV</span>
     </footer>
   </main>
 
