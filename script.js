@@ -1,166 +1,389 @@
 /* ============================================================
-   Retro Vinyl Player — lógica de reproducción
+   Velouria 1200 — Hi-Fi MP3 Player
+   Optimizations:
+   - Single rAF loop driving VU meters + marquee
+   - Pointer Events for sliders/knob (works on mouse + touch + pen)
+   - ResizeObserver + DPR-aware canvas resizing
+   - Event delegation on the playlist
+   - Lazy AudioContext (created on first user gesture)
+   - Cached DOM lookups, no per-frame allocations
    ============================================================ */
 
 (() => {
   "use strict";
 
-  // ----- Referencias del DOM -----
-  const audio = document.getElementById("audio");
-  const vinyl = document.getElementById("vinyl");
-  const tonearm = document.getElementById("tonearm");
-  const vinylTitle = document.getElementById("vinylTitle");
-  const vinylArtist = document.getElementById("vinylArtist");
-  const trackTitle = document.getElementById("trackTitle");
-  const trackArtist = document.getElementById("trackArtist");
-  const currentTimeEl = document.getElementById("currentTime");
-  const totalTimeEl = document.getElementById("totalTime");
-  const progressBar = document.getElementById("progressBar");
-  const progressFill = document.getElementById("progressFill");
-  const progressThumb = document.getElementById("progressThumb");
-  const playBtn = document.getElementById("playBtn");
-  const iconPlay = document.getElementById("iconPlay");
-  const iconPause = document.getElementById("iconPause");
-  const prevBtn = document.getElementById("prevBtn");
-  const nextBtn = document.getElementById("nextBtn");
-  const shuffleBtn = document.getElementById("shuffleBtn");
-  const repeatBtn = document.getElementById("repeatBtn");
-  const volumeBar = document.getElementById("volumeBar");
-  const volumeFill = document.getElementById("volumeFill");
-  const volumeThumb = document.getElementById("volumeThumb");
-  const fileInput = document.getElementById("fileInput");
-  const clearBtn = document.getElementById("clearBtn");
-  const dropzone = document.getElementById("dropzone");
-  const playlistEl = document.getElementById("playlist");
-  const visualizerCanvas = document.getElementById("visualizer");
-  const statusText = document.getElementById("statusText");
-  const statusPill = document.getElementById("statusPill");
+  // ----- DOM refs (cached once) -----
+  const $ = (id) => document.getElementById(id);
 
-  // ----- Estado -----
-  /** @type {{ id:string, name:string, artist:string, url:string, file:File, duration:number }[]} */
+  const audio        = $("audio");
+  const vinyl        = $("vinyl");
+  const tonearm      = $("tonearm");
+  const cueingLever  = $("cueingLever");
+  const platterEl    = $("platter");
+  const vinylTitle   = $("vinylTitle");
+  const vinylArtist  = $("vinylArtist");
+
+  const ledTitleEl   = $("ledTitle");
+  const ledTrackNum  = $("ledTrackNum");
+  const ledCurTime   = $("ledCurrentTime");
+  const ledTotalTime = $("ledTotalTime");
+  const ledBarFill   = $("ledBarFill");
+  const ledBarThumb  = $("ledBarThumb");
+  const progressBar  = $("progressBar");
+
+  const playBtn   = $("playBtn");
+  const playLabel = $("playLabel");
+  const iconPlay  = $("iconPlay");
+  const iconPause = $("iconPause");
+  const prevBtn   = $("prevBtn");
+  const nextBtn   = $("nextBtn");
+  const shuffleBtn = $("shuffleBtn");
+  const repeatBtn  = $("repeatBtn");
+
+  const volumeKnob  = $("volumeKnob");
+  const volumeValue = $("volumeValue");
+  const knobDial    = volumeKnob.querySelector(".knob-dial");
+
+  const fileInput  = $("fileInput");
+  const clearBtn   = $("clearBtn");
+  const dropzone   = $("dropzone");
+  const playlistEl = $("playlist");
+  const trackCount = $("trackCount");
+
+  const powerLed = $("powerLed");
+  const speedBtns = document.querySelectorAll(".speed-btn");
+  const vuCanvases = document.querySelectorAll(".vu-canvas");
+  const ledMarquee = document.querySelector(".led-marquee");
+
+  // ----- State -----
+  /** @type {{id:string,name:string,title:string,artist:string,url:string,duration:number}[]} */
   const tracks = [];
   let currentIndex = -1;
   let isShuffle = false;
   /** @type {"off"|"all"|"one"} */
   let repeatMode = "off";
   let volume = 0.8;
+  let speedRpm = 33; // 33 or 45
 
-  // ----- Web Audio API (visualizador) -----
+  // Knob: angle range -135deg (min) → +135deg (max)
+  const KNOB_MIN = -135;
+  const KNOB_MAX = 135;
+
+  // ----- Lazy Web Audio -----
   let audioCtx = null;
   let analyser = null;
-  let sourceNode = null;
-  const ctx2d = visualizerCanvas.getContext("2d");
+  let timeData = null;
+  let mediaSource = null;
 
   function ensureAudioGraph() {
     if (audioCtx) return;
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
       audioCtx = new AC();
-      sourceNode = audioCtx.createMediaElementSource(audio);
+      mediaSource = audioCtx.createMediaElementSource(audio);
       analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 128;
-      analyser.smoothingTimeConstant = 0.78;
-      sourceNode.connect(analyser);
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.8;
+      timeData = new Uint8Array(analyser.fftSize);
+      mediaSource.connect(analyser);
       analyser.connect(audioCtx.destination);
     } catch (err) {
-      console.warn("AudioContext no disponible:", err);
+      console.warn("AudioContext unavailable:", err);
     }
   }
 
-  // ----- Utilidades -----
+  // ----- VU meters (analog needle) -----
+  /** @type {{canvas:HTMLCanvasElement, ctx:CanvasRenderingContext2D, w:number, h:number, dpr:number, value:number}[]} */
+  const vuMeters = [];
+
+  function setupVuMeters() {
+    vuCanvases.forEach((canvas) => {
+      const ctx = canvas.getContext("2d");
+      vuMeters.push({ canvas, ctx, w: 0, h: 0, dpr: 1, value: 0 });
+    });
+
+    const resizeAll = () => {
+      const dpr = window.devicePixelRatio || 1;
+      vuMeters.forEach((m) => {
+        const rect = m.canvas.getBoundingClientRect();
+        m.dpr = dpr;
+        m.w = rect.width;
+        m.h = rect.height;
+        m.canvas.width = Math.floor(rect.width * dpr);
+        m.canvas.height = Math.floor(rect.height * dpr);
+      });
+    };
+
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(resizeAll);
+      vuCanvases.forEach((c) => ro.observe(c));
+    } else {
+      window.addEventListener("resize", resizeAll);
+    }
+    resizeAll();
+  }
+
+  function drawVuMeter(m, level) {
+    const { ctx, w, h, dpr } = m;
+    if (!w || !h) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    // Cream paper background gradient
+    const bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, "#efe6d2");
+    bg.addColorStop(1, "#d9cfb8");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // Pivot at bottom-center, arc above
+    const cx = w * 0.5;
+    const cy = h * 1.05;
+    const r = Math.min(w * 0.85, h * 1.25);
+
+    // Arc tick marks
+    const startA = Math.PI * 1.15; // ~207deg
+    const endA   = Math.PI * 1.85; // ~333deg
+    const span = endA - startA;
+
+    // Green zone
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = "rgba(40, 110, 50, 0.85)";
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 0.78, startA, startA + span * 0.7);
+    ctx.stroke();
+
+    // Red zone (overload)
+    ctx.strokeStyle = "rgba(180, 30, 25, 0.9)";
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 0.78, startA + span * 0.7, endA);
+    ctx.stroke();
+
+    // Tick lines
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "#2a1a08";
+    for (let i = 0; i <= 10; i++) {
+      const t = i / 10;
+      const a = startA + span * t;
+      const inner = i % 2 === 0 ? r * 0.66 : r * 0.7;
+      const outer = r * 0.74;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * inner, cy + Math.sin(a) * inner);
+      ctx.lineTo(cx + Math.cos(a) * outer, cy + Math.sin(a) * outer);
+      ctx.stroke();
+    }
+
+    // Number labels (just a few)
+    ctx.fillStyle = "#1a1208";
+    ctx.font = `${Math.max(8, h * 0.10)}px "Playfair Display", serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    [0, 0.5, 1].forEach((t) => {
+      const a = startA + span * t;
+      const lr = r * 0.58;
+      const lx = cx + Math.cos(a) * lr;
+      const ly = cy + Math.sin(a) * lr;
+      const label = t === 0 ? "0" : t === 0.5 ? "5" : "10";
+      ctx.fillText(label, lx, ly);
+    });
+
+    // VU label
+    ctx.font = `bold ${Math.max(7, h * 0.09)}px "Playfair Display", serif`;
+    ctx.fillStyle = "rgba(26, 18, 8, 0.6)";
+    ctx.fillText("VU", cx, h * 0.5);
+
+    // Needle
+    const a = startA + span * level;
+    const nx = cx + Math.cos(a) * r * 0.74;
+    const ny = cy + Math.sin(a) * r * 0.74;
+
+    // Needle shadow
+    ctx.strokeStyle = "rgba(0,0,0,0.18)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx + 1, cy + 1);
+    ctx.lineTo(nx + 1, ny + 1);
+    ctx.stroke();
+
+    // Needle
+    ctx.strokeStyle = "#1a1208";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(nx, ny);
+    ctx.stroke();
+
+    // Pivot dot
+    ctx.fillStyle = "#0a0604";
+    ctx.beginPath();
+    ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#7a4a2c";
+    ctx.beginPath();
+    ctx.arc(cx, cy, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // ----- Single rAF loop -----
+  let rafId = 0;
+  let isAnimating = false;
+  // Reusable peak holders to avoid allocations
+  const peakDecay = 0.08;
+  let peakL = 0, peakR = 0;
+
+  function animate() {
+    rafId = requestAnimationFrame(animate);
+
+    if (!analyser) {
+      // No audio graph yet — let needles fall to rest
+      peakL *= 0.9;
+      peakR *= 0.9;
+    } else {
+      analyser.getByteTimeDomainData(timeData);
+      // Compute RMS for L/R approximation (mono signal here, so we
+      // separate by alternating sample halves for visual variety).
+      let sumL = 0, sumR = 0;
+      const n = timeData.length;
+      const half = n >> 1;
+      for (let i = 0; i < half; i++) {
+        const v = (timeData[i] - 128) / 128;
+        sumL += v * v;
+      }
+      for (let i = half; i < n; i++) {
+        const v = (timeData[i] - 128) / 128;
+        sumR += v * v;
+      }
+      const rmsL = Math.sqrt(sumL / half);
+      const rmsR = Math.sqrt(sumR / half);
+
+      // Smooth the needle (heavy needle physics ~ low-pass)
+      peakL += (Math.min(1, rmsL * 2.6) - peakL) * 0.18;
+      peakR += (Math.min(1, rmsR * 2.6) - peakR) * 0.18;
+
+      // Decay if signal stops
+      peakL = Math.max(0, peakL - peakDecay * 0.02);
+      peakR = Math.max(0, peakR - peakDecay * 0.02);
+    }
+
+    if (vuMeters[0]) drawVuMeter(vuMeters[0], peakL);
+    if (vuMeters[1]) drawVuMeter(vuMeters[1], peakR);
+  }
+
+  function startAnim() {
+    if (isAnimating) return;
+    isAnimating = true;
+    animate();
+  }
+  function stopAnim() {
+    isAnimating = false;
+    cancelAnimationFrame(rafId);
+  }
+
+  // ----- Utilities -----
   function fmtTime(sec) {
     if (!isFinite(sec) || sec < 0) sec = 0;
     const m = Math.floor(sec / 60);
     const s = Math.floor(sec % 60).toString().padStart(2, "0");
     return `${m}:${s}`;
   }
-
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => (
+      { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+    ));
+  }
   function parseMeta(filename) {
-    // "Artista - Titulo.mp3" -> { title, artist }
     const base = filename.replace(/\.[^/.]+$/, "");
     const parts = base.split(" - ");
     if (parts.length >= 2) {
       return { artist: parts[0].trim(), title: parts.slice(1).join(" - ").trim() };
     }
-    return { artist: "Desconocido", title: base.trim() };
+    return { artist: "Unknown", title: base.trim() };
+  }
+  function setSpinDuration() {
+    // 33⅓ rpm → 1.8 s/rev,  45 rpm → 1.333 s/rev
+    const rev = speedRpm === 45 ? 60 / 45 : 60 / 33.333;
+    vinyl.style.setProperty("--spin-duration", rev.toFixed(3) + "s");
   }
 
-  function setStatus(text, playing = false) {
-    statusText.textContent = text;
-    statusPill.classList.toggle("is-playing", playing);
-  }
-
-  // ----- Render de la lista de reproducción -----
+  // ----- Playlist render (event-delegated, single innerHTML build) -----
   function renderPlaylist() {
-    playlistEl.innerHTML = "";
-    tracks.forEach((t, i) => {
-      const li = document.createElement("li");
-      li.className = "playlist-item" + (i === currentIndex ? " is-current" : "");
-      li.dataset.index = String(i);
-      li.innerHTML = `
-        <span class="pl-index">${i + 1}</span>
-        <div class="pl-info">
-          <div class="pl-title">${escapeHtml(t.title)}</div>
-          <div class="pl-sub">${escapeHtml(t.artist)}</div>
-        </div>
-        <span class="pl-duration">${t.duration ? fmtTime(t.duration) : "—:—"}</span>
-        <button class="pl-remove" aria-label="Eliminar pista" title="Eliminar">×</button>
-      `;
-      li.addEventListener("click", (e) => {
-        if (e.target.closest(".pl-remove")) return;
-        loadTrack(i, true);
-      });
-      li.querySelector(".pl-remove").addEventListener("click", (e) => {
-        e.stopPropagation();
-        removeTrack(i);
-      });
-      playlistEl.appendChild(li);
-    });
+    if (!tracks.length) {
+      playlistEl.innerHTML = "";
+      trackCount.textContent = "0 RECORDS";
+      return;
+    }
+
+    const parts = [];
+    for (let i = 0; i < tracks.length; i++) {
+      const t = tracks[i];
+      const num = String(i + 1).padStart(2, "0");
+      const dur = t.duration ? fmtTime(t.duration) : "—:—";
+      const cls = i === currentIndex ? "tl-item is-current" : "tl-item";
+      parts.push(
+        `<li class="${cls}" data-index="${i}">` +
+          `<span class="tl-num">${num}</span>` +
+          `<div class="tl-info">` +
+            `<div class="tl-title">${escapeHtml(t.title)}</div>` +
+            `<div class="tl-sub">${escapeHtml(t.artist)}</div>` +
+          `</div>` +
+          `<span class="tl-duration">${dur}</span>` +
+          `<button class="tl-remove" data-action="remove" aria-label="Eject">×</button>` +
+        `</li>`
+      );
+    }
+    playlistEl.innerHTML = parts.join("");
+    trackCount.textContent =
+      `${String(tracks.length).padStart(2, "0")} RECORD${tracks.length === 1 ? "" : "S"}`;
   }
 
-  function escapeHtml(str) {
-    return String(str).replace(/[&<>"']/g, (c) => ({
-      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-    }[c]));
-  }
+  // Single delegated handler for the whole list
+  playlistEl.addEventListener("click", (e) => {
+    const removeBtn = e.target.closest("[data-action='remove']");
+    const item = e.target.closest(".tl-item");
+    if (!item) return;
+    const i = Number(item.dataset.index);
+    if (removeBtn) {
+      e.stopPropagation();
+      removeTrack(i);
+      return;
+    }
+    loadTrack(i, true);
+  });
 
-  // ----- Manipulación de pistas -----
+  // ----- Tracks -----
   function addFiles(fileList) {
-    const files = Array.from(fileList).filter((f) => f.type.startsWith("audio") || /\.mp3$/i.test(f.name));
+    const files = Array.from(fileList).filter(
+      (f) => (f.type && f.type.startsWith("audio")) || /\.mp3$/i.test(f.name)
+    );
     if (!files.length) return;
-    files.forEach((file) => {
+
+    for (const file of files) {
+      const id = `${file.name}-${file.size}-${file.lastModified}`;
+      if (tracks.some((t) => t.id === id)) continue;
       const meta = parseMeta(file.name);
       const url = URL.createObjectURL(file);
-      const id = `${file.name}-${file.size}-${file.lastModified}`;
-      // Evitar duplicados
-      if (tracks.some((t) => t.id === id)) {
-        URL.revokeObjectURL(url);
-        return;
-      }
       const track = {
-        id,
-        name: file.name,
-        title: meta.title,
-        artist: meta.artist,
-        url,
-        file,
-        duration: 0,
+        id, name: file.name,
+        title: meta.title, artist: meta.artist,
+        url, duration: 0,
       };
       tracks.push(track);
-      // Pre-calcular duración con un audio temporal
-      const tmp = new Audio();
-      tmp.preload = "metadata";
-      tmp.src = url;
-      tmp.addEventListener("loadedmetadata", () => {
-        track.duration = tmp.duration || 0;
-        renderPlaylist();
-      });
-    });
-    renderPlaylist();
-    if (currentIndex === -1 && tracks.length) {
-      loadTrack(0, false);
+
+      // Compute duration off-thread without re-rendering everything
+      const probe = new Audio();
+      probe.preload = "metadata";
+      probe.src = url;
+      probe.addEventListener("loadedmetadata", () => {
+        track.duration = probe.duration || 0;
+        // Update only the duration cell of this track, if present
+        const li = playlistEl.querySelector(`.tl-item[data-index="${tracks.indexOf(track)}"]`);
+        if (li) li.querySelector(".tl-duration").textContent = fmtTime(track.duration);
+        else renderPlaylist();
+      }, { once: true });
     }
-    setStatus(`${tracks.length} pista${tracks.length === 1 ? "" : "s"} en cola`);
+
+    renderPlaylist();
+    if (currentIndex === -1 && tracks.length) loadTrack(0, false);
   }
 
   function removeTrack(index) {
@@ -168,6 +391,7 @@
     const t = tracks[index];
     if (t) URL.revokeObjectURL(t.url);
     tracks.splice(index, 1);
+
     if (!tracks.length) {
       stopAndReset();
       renderPlaylist();
@@ -183,7 +407,7 @@
   }
 
   function clearAll() {
-    tracks.forEach((t) => URL.revokeObjectURL(t.url));
+    for (const t of tracks) URL.revokeObjectURL(t.url);
     tracks.length = 0;
     stopAndReset();
     renderPlaylist();
@@ -195,110 +419,96 @@
     audio.load();
     currentIndex = -1;
     setPlayingUI(false);
-    trackTitle.textContent = "Selecciona una canción";
-    trackArtist.textContent = "Tu biblioteca está vacía";
-    vinylTitle.textContent = "Sin pista";
-    vinylArtist.textContent = "Carga un MP3";
-    progressFill.style.width = "0%";
-    progressThumb.style.left = "0%";
-    currentTimeEl.textContent = "0:00";
-    totalTimeEl.textContent = "0:00";
-    setStatus("Listo");
+    ledTitleEl.textContent = "— NO TRACK LOADED —";
+    ledTrackNum.textContent = "--";
+    vinylTitle.textContent = "NO RECORD";
+    vinylArtist.textContent = "— LOAD A TRACK —";
+    ledBarFill.style.width = "0%";
+    ledBarThumb.style.left = "0%";
+    ledCurTime.textContent = "0:00";
+    ledTotalTime.textContent = "0:00";
+    powerLed.classList.remove("is-on");
+    cueingLever.classList.remove("is-down");
+    updateMarquee();
   }
 
-  // ----- Reproducción -----
+  // ----- Playback -----
   function loadTrack(index, autoPlay) {
     if (index < 0 || index >= tracks.length) return;
     currentIndex = index;
     const t = tracks[index];
     audio.src = t.url;
     audio.load();
-    trackTitle.textContent = t.title;
-    trackArtist.textContent = t.artist;
+
+    ledTitleEl.textContent = `${t.artist.toUpperCase()} — ${t.title.toUpperCase()}`;
+    ledTrackNum.textContent = String(index + 1).padStart(2, "0");
     vinylTitle.textContent = t.title;
     vinylArtist.textContent = t.artist;
+    powerLed.classList.add("is-on");
     renderPlaylist();
-    if (autoPlay) {
-      play();
-    } else {
-      setStatus(`Cargado: ${t.title}`);
-    }
+    updateMarquee();
+
+    if (autoPlay) play();
   }
 
   function play() {
-    if (currentIndex === -1 && tracks.length) {
-      loadTrack(0, false);
-    }
+    if (currentIndex === -1 && tracks.length) loadTrack(0, false);
     if (!audio.src) return;
     ensureAudioGraph();
     if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
     const p = audio.play();
-    if (p && typeof p.then === "function") {
-      p.then(() => {
-        setPlayingUI(true);
-        startVisualizer();
-      }).catch((err) => {
-        console.warn("No se pudo reproducir:", err);
-        setStatus("Toca para reproducir");
-      });
-    }
+    if (p && p.then) p.catch(() => {/* user gesture required, no-op */});
   }
-
-  function pause() {
-    audio.pause();
-    setPlayingUI(false);
-  }
-
-  function togglePlay() {
-    if (audio.paused) play(); else pause();
-  }
+  function pause() { audio.pause(); }
+  function togglePlay() { audio.paused ? play() : pause(); }
 
   function next() {
     if (!tracks.length) return;
     let i;
     if (isShuffle) {
       if (tracks.length === 1) i = 0;
-      else {
-        do { i = Math.floor(Math.random() * tracks.length); } while (i === currentIndex);
-      }
+      else { do { i = Math.floor(Math.random() * tracks.length); } while (i === currentIndex); }
     } else {
       i = (currentIndex + 1) % tracks.length;
     }
     loadTrack(i, true);
   }
-
   function prev() {
     if (!tracks.length) return;
-    if (audio.currentTime > 3) {
-      audio.currentTime = 0;
-      return;
-    }
+    if (audio.currentTime > 3) { audio.currentTime = 0; return; }
     const i = (currentIndex - 1 + tracks.length) % tracks.length;
     loadTrack(i, true);
   }
 
   function setPlayingUI(playing) {
-    iconPlay.style.display = playing ? "none" : "";
-    iconPause.style.display = playing ? "" : "none";
-    playBtn.classList.toggle("is-playing", playing);
-    playBtn.setAttribute("aria-label", playing ? "Pausar" : "Reproducir");
-    vinyl.classList.toggle("is-playing", playing);
-    tonearm.classList.toggle("is-playing", playing);
     if (playing) {
-      const t = tracks[currentIndex];
-      setStatus(t ? `Reproduciendo · ${t.title}` : "Reproduciendo", true);
+      iconPlay.hidden = true;
+      iconPause.hidden = false;
+      playLabel.textContent = "PAUSE";
+      playBtn.classList.add("is-playing");
+      playBtn.setAttribute("aria-label", "Pausar");
+      vinyl.classList.add("is-playing");
+      tonearm.classList.add("is-playing");
+      cueingLever.classList.add("is-down");
+      powerLed.classList.add("is-on");
     } else {
-      setStatus("En pausa");
+      iconPlay.hidden = false;
+      iconPause.hidden = true;
+      playLabel.textContent = "PLAY";
+      playBtn.classList.remove("is-playing");
+      playBtn.setAttribute("aria-label", "Reproducir");
+      vinyl.classList.remove("is-playing");
+      tonearm.classList.remove("is-playing");
+      cueingLever.classList.remove("is-down");
     }
   }
 
-  // ----- Modos shuffle/repeat -----
+  // ----- Modes -----
   function toggleShuffle() {
     isShuffle = !isShuffle;
     shuffleBtn.classList.toggle("is-active", isShuffle);
     shuffleBtn.setAttribute("aria-pressed", String(isShuffle));
   }
-
   function cycleRepeat() {
     repeatMode = repeatMode === "off" ? "all" : repeatMode === "all" ? "one" : "off";
     repeatBtn.dataset.mode = repeatMode;
@@ -307,145 +517,129 @@
     audio.loop = repeatMode === "one";
   }
 
-  // ----- Progreso -----
+  // ----- Progress (LED bar) -----
   function updateProgress() {
     const dur = audio.duration || 0;
     const cur = audio.currentTime || 0;
     const pct = dur ? (cur / dur) * 100 : 0;
-    progressFill.style.width = pct + "%";
-    progressThumb.style.left = pct + "%";
+    ledBarFill.style.width = pct + "%";
+    ledBarThumb.style.left = pct + "%";
     progressBar.setAttribute("aria-valuenow", String(Math.round(pct)));
-    currentTimeEl.textContent = fmtTime(cur);
-    totalTimeEl.textContent = fmtTime(dur);
+    ledCurTime.textContent = fmtTime(cur);
+    ledTotalTime.textContent = fmtTime(dur);
   }
 
-  function seekFromEvent(ev) {
+  function seekFromPointer(clientX) {
     const rect = progressBar.getBoundingClientRect();
-    const x = (ev.touches ? ev.touches[0].clientX : ev.clientX) - rect.left;
-    const ratio = Math.max(0, Math.min(1, x / rect.width));
-    if (audio.duration) {
-      audio.currentTime = ratio * audio.duration;
-    }
-    progressFill.style.width = ratio * 100 + "%";
-    progressThumb.style.left = ratio * 100 + "%";
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    if (audio.duration) audio.currentTime = ratio * audio.duration;
+    ledBarFill.style.width = (ratio * 100) + "%";
+    ledBarThumb.style.left = (ratio * 100) + "%";
   }
 
-  function setupSliderDrag(barEl, onMove) {
-    let dragging = false;
-    const start = (e) => {
-      dragging = true;
-      barEl.classList.add("is-dragging");
+  // ----- Pointer-based slider helper (works for mouse, touch, pen) -----
+  function bindPointerDrag(el, onDown, onMove, onUp) {
+    el.addEventListener("pointerdown", (e) => {
+      el.setPointerCapture(e.pointerId);
+      el.classList.add("is-dragging");
+      onDown(e);
+    });
+    el.addEventListener("pointermove", (e) => {
+      if (!el.hasPointerCapture(e.pointerId)) return;
       onMove(e);
-      e.preventDefault();
+    });
+    const release = (e) => {
+      if (el.hasPointerCapture(e.pointerId)) {
+        el.releasePointerCapture(e.pointerId);
+      }
+      el.classList.remove("is-dragging");
+      if (onUp) onUp(e);
     };
-    const move = (e) => { if (dragging) onMove(e); };
-    const end = () => {
-      if (!dragging) return;
-      dragging = false;
-      barEl.classList.remove("is-dragging");
-    };
-    barEl.addEventListener("mousedown", start);
-    barEl.addEventListener("touchstart", start, { passive: false });
-    window.addEventListener("mousemove", move);
-    window.addEventListener("touchmove", move, { passive: false });
-    window.addEventListener("mouseup", end);
-    window.addEventListener("touchend", end);
-    window.addEventListener("touchcancel", end);
+    el.addEventListener("pointerup", release);
+    el.addEventListener("pointercancel", release);
   }
 
-  // ----- Volumen -----
-  function setVolumeFromEvent(ev) {
-    const rect = volumeBar.getBoundingClientRect();
-    const x = (ev.touches ? ev.touches[0].clientX : ev.clientX) - rect.left;
-    const ratio = Math.max(0, Math.min(1, x / rect.width));
-    setVolume(ratio);
-  }
+  bindPointerDrag(
+    progressBar,
+    (e) => seekFromPointer(e.clientX),
+    (e) => seekFromPointer(e.clientX)
+  );
 
+  // ----- Volume knob (vertical drag) -----
   function setVolume(v) {
     volume = Math.max(0, Math.min(1, v));
     audio.volume = volume;
-    const pct = volume * 100;
-    volumeFill.style.width = pct + "%";
-    volumeThumb.style.left = pct + "%";
-    volumeBar.setAttribute("aria-valuenow", String(Math.round(pct)));
+    const angle = KNOB_MIN + (KNOB_MAX - KNOB_MIN) * volume;
+    knobDial.style.setProperty("--knob-angle", angle + "deg");
+    const pct = Math.round(volume * 100);
+    volumeValue.textContent = String(pct);
+    volumeKnob.setAttribute("aria-valuenow", String(pct));
   }
 
-  // ----- Visualizador -----
-  let rafId = null;
-  function startVisualizer() {
-    if (!analyser) return;
-    cancelAnimationFrame(rafId);
-    const buffer = new Uint8Array(analyser.frequencyBinCount);
+  let knobStartY = 0;
+  let knobStartVol = 0;
+  bindPointerDrag(
+    volumeKnob,
+    (e) => { knobStartY = e.clientY; knobStartVol = volume; },
+    (e) => {
+      // 200px drag = full range, vertical (up = louder)
+      const dy = knobStartY - e.clientY;
+      setVolume(knobStartVol + dy / 200);
+    }
+  );
+  // Wheel for fine control on knob
+  volumeKnob.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    setVolume(volume + (e.deltaY < 0 ? 0.04 : -0.04));
+  }, { passive: false });
+  // Keyboard
+  volumeKnob.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowUp" || e.key === "ArrowRight") { e.preventDefault(); setVolume(volume + 0.05); }
+    if (e.key === "ArrowDown" || e.key === "ArrowLeft") { e.preventDefault(); setVolume(volume - 0.05); }
+  });
 
-    const draw = () => {
-      rafId = requestAnimationFrame(draw);
-      // Resize canvas a su tamaño visible (sin perder calidad)
-      const dpr = window.devicePixelRatio || 1;
-      const w = visualizerCanvas.clientWidth;
-      const h = visualizerCanvas.clientHeight;
-      if (visualizerCanvas.width !== Math.floor(w * dpr) || visualizerCanvas.height !== Math.floor(h * dpr)) {
-        visualizerCanvas.width = Math.floor(w * dpr);
-        visualizerCanvas.height = Math.floor(h * dpr);
+  // ----- Marquee toggle (only animate when overflow) -----
+  function updateMarquee() {
+    // Defer to next frame so layout is up-to-date
+    requestAnimationFrame(() => {
+      const overflow = ledTitleEl.scrollWidth > ledMarquee.clientWidth + 4;
+      ledMarquee.classList.toggle("is-scrolling", overflow);
+      if (overflow) {
+        // Duplicate text so the marquee loops seamlessly via translateX(-50%)
+        const base = ledTitleEl.textContent.replace(/\s+•\s+.*$/, "");
+        ledTitleEl.textContent = `${base}     •     ${base}`;
       }
-      ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx2d.clearRect(0, 0, w, h);
-
-      analyser.getByteFrequencyData(buffer);
-      const bars = 48;
-      const step = Math.floor(buffer.length / bars);
-      const gap = 3;
-      const bw = (w - gap * (bars - 1)) / bars;
-
-      for (let i = 0; i < bars; i++) {
-        const v = buffer[i * step] / 255;
-        const bh = Math.max(2, v * h * 0.95);
-        const x = i * (bw + gap);
-        const y = h - bh;
-
-        const grad = ctx2d.createLinearGradient(0, y, 0, h);
-        grad.addColorStop(0, "#00f0ff");
-        grad.addColorStop(0.55, "#ff2bd6");
-        grad.addColorStop(1, "#b14bff");
-        ctx2d.fillStyle = grad;
-        ctx2d.shadowColor = "rgba(255, 43, 214, 0.5)";
-        ctx2d.shadowBlur = 8;
-        roundRect(ctx2d, x, y, bw, bh, Math.min(3, bw / 2));
-        ctx2d.fill();
-      }
-      ctx2d.shadowBlur = 0;
-    };
-    draw();
+    });
   }
 
-  function roundRect(c, x, y, w, h, r) {
-    c.beginPath();
-    c.moveTo(x + r, y);
-    c.lineTo(x + w - r, y);
-    c.quadraticCurveTo(x + w, y, x + w, y + r);
-    c.lineTo(x + w, y + h - r);
-    c.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-    c.lineTo(x + r, y + h);
-    c.quadraticCurveTo(x, y + h, x, y + h - r);
-    c.lineTo(x, y + r);
-    c.quadraticCurveTo(x, y, x + r, y);
-    c.closePath();
-  }
+  // ----- Speed buttons (33 / 45 RPM) -----
+  speedBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      speedBtns.forEach((b) => {
+        b.classList.remove("is-active");
+        b.setAttribute("aria-pressed", "false");
+      });
+      btn.classList.add("is-active");
+      btn.setAttribute("aria-pressed", "true");
+      speedRpm = Number(btn.dataset.speed);
+      setSpinDuration();
+      // Subtle pitch nudge for fun (45 = +35%, 33 = normal)
+      audio.playbackRate = speedRpm === 45 ? 1.0 : 1.0; // keep 1.0 for music sanity
+    });
+  });
 
-  // ----- Eventos del audio -----
+  // ----- Audio events -----
   audio.addEventListener("timeupdate", updateProgress);
   audio.addEventListener("loadedmetadata", () => {
     updateProgress();
     if (currentIndex >= 0 && tracks[currentIndex] && !tracks[currentIndex].duration) {
       tracks[currentIndex].duration = audio.duration || 0;
-      renderPlaylist();
+      const li = playlistEl.querySelector(`.tl-item[data-index="${currentIndex}"]`);
+      if (li) li.querySelector(".tl-duration").textContent = fmtTime(audio.duration || 0);
     }
   });
   audio.addEventListener("ended", () => {
-    if (repeatMode === "one") {
-      audio.currentTime = 0;
-      play();
-      return;
-    }
+    if (repeatMode === "one") { audio.currentTime = 0; play(); return; }
     if (currentIndex === tracks.length - 1 && repeatMode === "off" && !isShuffle) {
       setPlayingUI(false);
       audio.currentTime = 0;
@@ -455,72 +649,67 @@
   });
   audio.addEventListener("play", () => setPlayingUI(true));
   audio.addEventListener("pause", () => setPlayingUI(false));
-  audio.addEventListener("error", () => setStatus("Error al cargar la pista"));
 
-  // ----- Event listeners de controles -----
+  // ----- Buttons -----
   playBtn.addEventListener("click", togglePlay);
   prevBtn.addEventListener("click", prev);
   nextBtn.addEventListener("click", next);
   shuffleBtn.addEventListener("click", toggleShuffle);
   repeatBtn.addEventListener("click", cycleRepeat);
 
-  setupSliderDrag(progressBar, seekFromEvent);
-  setupSliderDrag(volumeBar, setVolumeFromEvent);
+  cueingLever.addEventListener("click", togglePlay);
 
-  // Teclas en sliders
+  // Progress bar keyboard
   progressBar.addEventListener("keydown", (e) => {
     if (!audio.duration) return;
-    const step = 5;
-    if (e.key === "ArrowLeft") audio.currentTime = Math.max(0, audio.currentTime - step);
-    if (e.key === "ArrowRight") audio.currentTime = Math.min(audio.duration, audio.currentTime + step);
-  });
-  volumeBar.addEventListener("keydown", (e) => {
-    if (e.key === "ArrowLeft") setVolume(volume - 0.05);
-    if (e.key === "ArrowRight") setVolume(volume + 0.05);
+    if (e.key === "ArrowLeft")  { audio.currentTime = Math.max(0, audio.currentTime - 5); e.preventDefault(); }
+    if (e.key === "ArrowRight") { audio.currentTime = Math.min(audio.duration, audio.currentTime + 5); e.preventDefault(); }
   });
 
-  // ----- Carga de archivos -----
+  // ----- File input + dropzone -----
   fileInput.addEventListener("change", (e) => addFiles(e.target.files));
   clearBtn.addEventListener("click", clearAll);
 
   ["dragenter", "dragover"].forEach((ev) => {
-    dropzone.addEventListener(ev, (e) => {
-      e.preventDefault();
-      dropzone.classList.add("is-dragging");
-    });
+    dropzone.addEventListener(ev, (e) => { e.preventDefault(); dropzone.classList.add("is-dragging"); });
   });
   ["dragleave", "drop"].forEach((ev) => {
-    dropzone.addEventListener(ev, (e) => {
-      e.preventDefault();
-      dropzone.classList.remove("is-dragging");
-    });
+    dropzone.addEventListener(ev, (e) => { e.preventDefault(); dropzone.classList.remove("is-dragging"); });
   });
   dropzone.addEventListener("drop", (e) => {
     if (e.dataTransfer && e.dataTransfer.files) addFiles(e.dataTransfer.files);
   });
-  // También aceptar drop a nivel de window (sin abrir archivo en navegador)
+  // Window-level drop (so users can drop anywhere)
   window.addEventListener("dragover", (e) => e.preventDefault());
   window.addEventListener("drop", (e) => {
-    if (e.target.closest(".dropzone")) return; // ya manejado
+    if (e.target.closest(".dropzone")) return;
     e.preventDefault();
     if (e.dataTransfer && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
   });
 
-  // ----- Atajos de teclado -----
+  // ----- Keyboard shortcuts -----
   document.addEventListener("keydown", (e) => {
-    const target = e.target;
-    const isFormField = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
-    if (isFormField) return;
+    const tag = (e.target && e.target.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA") return;
     switch (e.code) {
-      case "Space": e.preventDefault(); togglePlay(); break;
-      case "ArrowRight": if (e.shiftKey) next(); break;
-      case "ArrowLeft":  if (e.shiftKey) prev(); break;
-      case "KeyS": toggleShuffle(); break;
-      case "KeyR": cycleRepeat(); break;
+      case "Space":      e.preventDefault(); togglePlay(); break;
+      case "ArrowRight": if (e.shiftKey) { e.preventDefault(); next(); } break;
+      case "ArrowLeft":  if (e.shiftKey) { e.preventDefault(); prev(); } break;
+      case "KeyS":       toggleShuffle(); break;
+      case "KeyR":       cycleRepeat(); break;
     }
   });
 
-  // ----- Inicialización -----
+  // ----- Pause animation when tab hidden -----
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopAnim();
+    else startAnim();
+  });
+
+  // ----- Init -----
+  setupVuMeters();
+  setSpinDuration();
   setVolume(volume);
-  setStatus("Listo");
+  updateMarquee();
+  startAnim();
 })();
