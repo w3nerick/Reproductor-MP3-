@@ -94,6 +94,15 @@
   const tunerNeedle   = $("tunerNeedle");
   const tunerStereoLed = $("tunerStereoLed");
   const antiSkatingKnob = $("antiSkatingKnob");
+  /* Theater overlays + FM presets */
+  const cassetteOverlay   = $("cassetteOverlay");
+  const cassetteHubLeft   = $("cassetteHubLeft");
+  const cassetteHubRight  = $("cassetteHubRight");
+  const cassetteCounterEl = $("cassetteCounter");
+  const cassetteTrackEl   = $("cassetteTrackTitle");
+  const auxOverlay        = $("auxOverlay");
+  const tunerPresetsEl    = $("tunerPresets");
+  const tunerPresetBtns   = document.querySelectorAll(".tuner-preset");
   const knobValueElems = {
     bass:    document.querySelector('[data-knob="bass"]'),
     treble:  document.querySelector('[data-knob="treble"]'),
@@ -789,7 +798,10 @@
     specCtx.setTransform(specDpr, 0, 0, specDpr, 0, 0);
     specCtx.clearRect(0, 0, specW, specH);
 
-    if (analyser && freqData) {
+    /* During a power-on sweep, tickSpectrumSweep already populated specBandValues. */
+    if (spectrumSweepActive) {
+      /* skip analyzer override */
+    } else if (analyser && freqData) {
       analyser.getByteFrequencyData(freqData);
       const sr = audioCtx.sampleRate;
       const nyq = sr / 2;
@@ -854,8 +866,12 @@
       peakL = Math.max(0, peakL - 0.0016);
       peakR = Math.max(0, peakR - 0.0016);
     }
+    /* Power-on calibration kick overrides VU levels for ~250ms. */
+    if (typeof tickVuKick === "function") tickVuKick();
     if (vuMeters[0]) drawVuMeter(vuMeters[0], peakL);
     if (vuMeters[1]) drawVuMeter(vuMeters[1], peakR);
+    /* Power-on spectrum sweep overrides analyzer bands during the sweep. */
+    if (typeof tickSpectrumSweep === "function") tickSpectrumSweep();
     drawSpectrum();
     tickWowFlutter();
   }
@@ -1553,6 +1569,9 @@
     if (sourceCtrl) sourceCtrl.set(idx);
     // Tuner panel visibility
     if (tunerPanel) tunerPanel.hidden = (src !== "tuner");
+    // Theater overlays: cassette deck for TAPE, AUX cable for AUX
+    if (cassetteOverlay) cassetteOverlay.classList.toggle("is-on", src === "tape");
+    if (auxOverlay)      auxOverlay.classList.toggle("is-on",      src === "aux");
     // Tuner audio control
     if (src === "tuner") {
       if (!audio.paused) audio.pause();
@@ -2135,6 +2154,215 @@
   }
 
   /* ============================================================
+     THEATER — TAPE DECK VISUAL (C1)
+     ============================================================ */
+  function syncCassetteSpin() {
+    if (!cassetteOverlay) return;
+    const playing = !audio.paused && currentSource === "tape";
+    cassetteOverlay.classList.toggle("is-spinning", playing);
+    /* Match the CSS spin duration to the same per-revolution time as the
+       vinyl. Tape hubs feel slower so we double it for visual taste. */
+    const rev = (speedRpm === 45 ? 60 / 45 : 60 / 33.333) * 2;
+    cassetteOverlay.style.setProperty("--cassette-spin", rev.toFixed(3) + "s");
+  }
+  audio.addEventListener("play", syncCassetteSpin);
+  audio.addEventListener("pause", syncCassetteSpin);
+
+  function updateCassetteUI() {
+    if (currentSource !== "tape" || !cassetteOverlay) return;
+    if (cassetteTrackEl) {
+      const t = currentIndex >= 0 ? tracks[currentIndex] : null;
+      cassetteTrackEl.textContent = t ? (t.title || t.name || "— UNTITLED —") : "— STAND BY —";
+    }
+    if (cassetteCounterEl) {
+      const cur = audio.currentTime || 0;
+      cassetteCounterEl.textContent = String(Math.floor(cur) % 1000).padStart(3, "0");
+    }
+  }
+  audio.addEventListener("timeupdate", updateCassetteUI);
+  audio.addEventListener("loadedmetadata", updateCassetteUI);
+
+  /* ============================================================
+     THEATER — FM STATION PRESETS (C2)
+     ============================================================ */
+  const FM_PRESET_DEFAULTS = [91.5, 96.7, 99.3, 102.5, 104.9, 107.1];
+  let fmPresets = FM_PRESET_DEFAULTS.slice();
+  function loadFmPresets() {
+    try {
+      const raw = localStorage.getItem("velouria.fmPresets");
+      if (!raw) return;
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr) && arr.length === 6 && arr.every((f) => typeof f === "number" && f >= 88 && f <= 108)) {
+        fmPresets = arr.slice();
+      }
+    } catch(e) {}
+  }
+  function saveFmPresets() {
+    try { localStorage.setItem("velouria.fmPresets", JSON.stringify(fmPresets)); } catch(e) {}
+  }
+  function renderFmPresetFreqs() {
+    tunerPresetBtns.forEach((btn) => {
+      const idx = Number(btn.dataset.presetIdx);
+      const f = fmPresets[idx];
+      const freqEl = btn.querySelector("[data-tp-freq]");
+      if (freqEl && typeof f === "number") freqEl.textContent = f.toFixed(1);
+    });
+  }
+  function highlightActiveFmPreset() {
+    tunerPresetBtns.forEach((btn) => {
+      const idx = Number(btn.dataset.presetIdx);
+      const match = Math.abs(fmPresets[idx] - tuner.freq) < 0.05;
+      btn.classList.toggle("is-active", match);
+    });
+  }
+  loadFmPresets();
+  renderFmPresetFreqs();
+
+  tunerPresetBtns.forEach((btn) => {
+    const idx = Number(btn.dataset.presetIdx);
+    let pressTimer = 0;
+    btn.addEventListener("click", () => {
+      sfx.tinyClick();
+      tuner.setFrequency(fmPresets[idx]);
+      highlightActiveFmPreset();
+    });
+    btn.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      fmPresets[idx] = Math.round(tuner.freq * 10) / 10;
+      saveFmPresets();
+      renderFmPresetFreqs();
+      btn.classList.add("is-flashing");
+      setTimeout(() => btn.classList.remove("is-flashing"), 1300);
+      sfx.tinyClick();
+      highlightActiveFmPreset();
+    });
+    /* Long-press as alternative for touch devices */
+    btn.addEventListener("pointerdown", () => {
+      clearTimeout(pressTimer);
+      pressTimer = setTimeout(() => {
+        fmPresets[idx] = Math.round(tuner.freq * 10) / 10;
+        saveFmPresets();
+        renderFmPresetFreqs();
+        btn.classList.add("is-flashing");
+        setTimeout(() => btn.classList.remove("is-flashing"), 1300);
+        sfx.tinyClick();
+        highlightActiveFmPreset();
+      }, 700);
+    });
+    const cancelLongPress = () => { clearTimeout(pressTimer); };
+    btn.addEventListener("pointerup", cancelLongPress);
+    btn.addEventListener("pointerleave", cancelLongPress);
+    btn.addEventListener("pointercancel", cancelLongPress);
+  });
+
+  /* When the tuner dial moves the frequency, refresh active LED. */
+  if (tunerDial) {
+    tunerDial.addEventListener("pointerup", highlightActiveFmPreset);
+    tunerDial.addEventListener("wheel", () => { setTimeout(highlightActiveFmPreset, 0); }, { passive: true });
+  }
+
+  /* ============================================================
+     THEATER — POWER-ON CASCADE (C3)
+     200ms speed cluster flicker (CSS) | 400ms power LED on (CSS) |
+     600ms VU calibration kick (JS) | 800ms spectrum sweep (JS) |
+     1000ms relay thunk + amber beep (JS) | 1200ms full power on
+     ============================================================ */
+  let vuKickActive = false;
+  let vuKickStart = 0;
+  function startVuCalibrationKick() {
+    vuKickActive = true;
+    vuKickStart = performance.now();
+  }
+  function tickVuKick() {
+    if (!vuKickActive) return;
+    const t = performance.now() - vuKickStart;
+    if (t > 250) {
+      vuKickActive = false;
+      return;
+    }
+    /* Peak to ~100% for first 80ms then settle to 0 by 250ms. */
+    let v;
+    if (t < 80)      v = 0.95;
+    else             v = Math.max(0, 0.95 * (1 - (t - 80) / 170));
+    peakL = v;
+    peakR = v;
+  }
+
+  let spectrumSweepActive = false;
+  let spectrumSweepStart = 0;
+  function startSpectrumSweep() {
+    spectrumSweepActive = true;
+    spectrumSweepStart = performance.now();
+  }
+  function tickSpectrumSweep() {
+    if (!spectrumSweepActive) return;
+    const t = performance.now() - spectrumSweepStart;
+    const dur = 350;
+    if (t > dur) {
+      spectrumSweepActive = false;
+      return;
+    }
+    /* Single moving column from left to right; light a tail behind it. */
+    const col = (t / dur) * SPEC_BANDS;
+    for (let b = 0; b < SPEC_BANDS; b++) {
+      const dist = Math.abs(b - col);
+      let v = 0;
+      if (dist < 0.6) v = 0.95;
+      else if (dist < 1.6) v = 0.6;
+      else if (dist < 2.6) v = 0.25;
+      specBandValues[b] = v;
+      if (v > specPeaks[b]) specPeaks[b] = v;
+    }
+  }
+
+  function powerOnAmberBeep() {
+    if (!sfx.enabled) return;
+    if (!audioCtx) {
+      /* Defer until first user gesture creates the AudioContext. */
+      const fire = () => {
+        if (!audioCtx) return;
+        document.removeEventListener("pointerdown", fire, true);
+        document.removeEventListener("keydown", fire, true);
+        powerOnAmberBeep();
+      };
+      document.addEventListener("pointerdown", fire, true);
+      document.addEventListener("keydown", fire, true);
+      return;
+    }
+    try {
+      const t0 = audioCtx.currentTime;
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = "sine";
+      o.frequency.value = 880;
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(0.10, t0 + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.085);
+      o.connect(g).connect(sfx.masterGain || audioCtx.destination);
+      o.start(t0);
+      o.stop(t0 + 0.10);
+    } catch(e) {}
+  }
+
+  function runPowerOnCascade() {
+    /* T+0ms: dim already applied via .powering-on class on body. */
+    /* T+200ms: speed cluster LED flicker — handled in CSS (animation-delay). */
+    /* T+400ms: power LED on — CSS handles it but ensure JS matches. */
+    setTimeout(() => { if (powerLed) powerLed.classList.add("is-on"); }, 400);
+    /* T+600ms: VU calibration kick. */
+    setTimeout(startVuCalibrationKick, 600);
+    /* T+800ms: spectrum sweep. */
+    setTimeout(startSpectrumSweep, 800);
+    /* T+1000ms: relay thunk + amber beep. */
+    setTimeout(() => {
+      if (sfx.enabled && audioCtx) sfx.relayThunk();
+      powerOnAmberBeep();
+    }, 1000);
+    /* T+1200ms: full power on (handled by existing INIT setTimeout). */
+  }
+  runPowerOnCascade();
+
+  /* ============================================================
      INIT
      ============================================================ */
   setupVuMeters();
@@ -2172,11 +2400,11 @@
     writeSettings();
   }
 
-  // Power-on animation: relay thunk after 600ms, full power after 1.2s
+  // Power-on animation: cascade is scheduled by runPowerOnCascade(); this just
+  // swaps the dim class for the lit class once the cascade completes.
   setTimeout(() => {
     document.body.classList.remove("powering-on");
     document.body.classList.add("power-on");
-    if (audioCtx) sfx.relayThunk();
   }, 1200);
 
   startAnim();

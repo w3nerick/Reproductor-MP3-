@@ -2693,3 +2693,350 @@ body.power-on .plinth {
    POWER-ON CALIBRATION KICK + SPECTRUM SWEEP
    ============================================================ */
 .spectrum.is-calibrating { filter: brightness(1.15) saturate(1.2); }
+
+
+/* ============================================================
+   CASSETTE DECK OVERLAY (visible only when source = TAPE)
+   Slides in from top of the platter-well; hubs spin while audio plays.
+   ============================================================ */
+.platter-well { position: relative; }
+
+.cassette-overlay {
+  position: absolute;
+  inset: 6% 4% auto 4%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-30%) scale(0.92);
+  transition: opacity 0.3s var(--ease-mech), transform 0.3s var(--ease-spring);
+  z-index: 6;
+}
+.cassette-overlay.is-on {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+.cassette-shell {
+  position: relative;
+  width: min(86%, 460px);
+  aspect-ratio: 16 / 10;
+  background:
+    linear-gradient(180deg, #2a2823 0%, #1a1814 100%);
+  border: 1px solid #0a0806;
+  border-radius: 6px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.55),
+    0 8px 18px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+.cassette-screws {
+  position: absolute;
+  inset: 5px;
+  pointer-events: none;
+}
+.cassette-screws span {
+  position: absolute;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #5a5a55 0%, #1a1a18 70%);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.7);
+}
+.cassette-screws span:nth-child(1) { top: 0; left: 0; }
+.cassette-screws span:nth-child(2) { top: 0; right: 0; }
+.cassette-screws span:nth-child(3) { bottom: 0; left: 0; }
+.cassette-screws span:nth-child(4) { bottom: 0; right: 0; }
+
+.cassette-label {
+  position: absolute;
+  top: 8%;
+  left: 8%;
+  right: 8%;
+  height: 36%;
+  background: linear-gradient(180deg, #f6ecd2 0%, #e3d4b1 100%);
+  border: 1px solid rgba(0, 0, 0, 0.45);
+  border-radius: 2px;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+.cassette-brand {
+  font-family: "Playfair Display", serif;
+  font-size: 10px;
+  letter-spacing: 4px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.cassette-side {
+  font-family: "VT323", monospace;
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: var(--ink-soft);
+  position: absolute;
+  top: 6px; right: 10px;
+}
+.cassette-track {
+  font-family: "Playfair Display", serif;
+  font-style: italic;
+  font-size: 13px;
+  color: var(--ink);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 2px;
+}
+.cassette-counter {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: "VT323", monospace;
+  font-size: 9px;
+  color: var(--ink-soft);
+}
+.cc-value {
+  font-size: 14px;
+  letter-spacing: 3px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.cassette-window {
+  position: absolute;
+  top: 50%;
+  left: 8%;
+  right: 8%;
+  height: 40%;
+  background:
+    linear-gradient(180deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.35) 100%);
+  border: 1px solid #0a0806;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8%;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+.cassette-tape-strip {
+  position: absolute;
+  top: 50%;
+  left: 14%;
+  right: 14%;
+  height: 22%;
+  transform: translateY(-50%);
+  background: linear-gradient(180deg, #4a3a2c 0%, #2a1f12 50%, #4a3a2c 100%);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.4);
+}
+.cassette-hub {
+  position: relative;
+  width: 28%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 45% 40%, #2a2620 0%, #0a0806 75%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 2px rgba(0, 0, 0, 0.7),
+    0 1px 2px rgba(0, 0, 0, 0.5);
+  z-index: 1;
+}
+.cassette-hub-teeth {
+  position: absolute; inset: 18%;
+  border-radius: 50%;
+  background:
+    repeating-conic-gradient(from 0deg,
+      rgba(255, 255, 255, 0.08) 0 12deg,
+      rgba(0, 0, 0, 0.55) 12deg 24deg);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+.cassette-hub-teeth::after {
+  content: "";
+  position: absolute;
+  inset: 30%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #3a3a36 0%, #0a0806 80%);
+}
+.cassette-overlay.is-spinning .cassette-hub-teeth {
+  animation: cassette-hub-spin var(--cassette-spin, 1.8s) linear infinite;
+}
+@keyframes cassette-hub-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@media (max-width: 760px) {
+  .cassette-shell { width: 92%; }
+  .cassette-track { font-size: 11px; }
+  .cc-value { font-size: 12px; }
+}
+
+/* ============================================================
+   AUX cable overlay (visible only when source = AUX)
+   Decorative; tape/aux still play the loaded MP3.
+   ============================================================ */
+.aux-overlay {
+  position: absolute;
+  bottom: 6%;
+  right: 4%;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(20%);
+  transition: opacity 0.3s var(--ease-mech), transform 0.3s var(--ease-spring);
+  z-index: 5;
+}
+.aux-overlay.is-on {
+  opacity: 1;
+  transform: translateY(0);
+}
+.aux-jack {
+  position: relative;
+  background: linear-gradient(180deg, #2a2823 0%, #15140f 100%);
+  border: 1px solid #0a0806;
+  border-radius: 3px;
+  padding: 6px 10px 8px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 2px rgba(0, 0, 0, 0.55),
+    0 4px 10px rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.aux-tag {
+  font-family: "Inter", sans-serif;
+  font-size: 8px;
+  letter-spacing: 2px;
+  color: var(--accent-led);
+  text-shadow: 0 0 3px var(--accent-glow);
+  font-weight: 700;
+}
+.aux-rca {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #2a2622 0%, #0a0806 80%);
+  border: 1px solid #0a0604;
+  position: relative;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.aux-rca-l { box-shadow: inset 0 0 0 2px #b22; }
+.aux-rca-r { box-shadow: inset 0 0 0 2px #fff; }
+.aux-rca span {
+  position: absolute; inset: 4px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 40%, #5a5a55 0%, #15140f 80%);
+}
+.aux-cable {
+  position: absolute;
+  top: 50%;
+  right: 100%;
+  width: 80px;
+  height: 4px;
+  background: linear-gradient(180deg, #1a1208 0%, #4a2c14 50%, #1a1208 100%);
+  border-radius: 2px;
+  transform-origin: right center;
+  transform: translateY(-50%) rotate(-12deg);
+}
+
+/* ============================================================
+   FM TUNER STATION PRESETS
+   ============================================================ */
+.tuner-presets {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+  margin-top: 4px;
+}
+.tuner-preset {
+  appearance: none;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 4px 5px;
+  background: linear-gradient(180deg, #2a1808 0%, #120804 100%);
+  border: 1px solid rgba(0, 0, 0, 0.7);
+  border-radius: 3px;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 174, 61, 0.15),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.5),
+    0 1px 0 rgba(0, 0, 0, 0.55);
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.1s var(--ease-mech), box-shadow 0.1s;
+}
+.tuner-preset:active {
+  transform: translateY(1px);
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.6),
+    0 0 0 rgba(0, 0, 0, 0);
+}
+.tuner-preset .tp-led {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #2a1a08 0%, #0a0604 70%);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.7);
+}
+.tuner-preset.is-active .tp-led {
+  background: radial-gradient(circle at 30% 30%, var(--accent-led) 0%, #8a4a14 80%);
+  box-shadow: 0 0 4px var(--accent-glow), 0 0 8px rgba(255, 174, 61, 0.45);
+}
+.tuner-preset.is-flashing .tp-led {
+  animation: tp-flash 0.6s ease-out 2;
+}
+@keyframes tp-flash {
+  0%   { box-shadow: 0 0 8px var(--accent-glow), 0 0 16px rgba(255, 174, 61, 0.7); }
+  100% { box-shadow: 0 0 0 rgba(0, 0, 0, 0); }
+}
+.tuner-preset .tp-freq {
+  font-family: "VT323", monospace;
+  font-size: 16px;
+  letter-spacing: 2px;
+  color: var(--accent-led);
+  text-shadow: 0 0 4px var(--accent-glow);
+}
+.tuner-preset .tp-name {
+  font-family: "Inter", sans-serif;
+  font-size: 7.5px;
+  letter-spacing: 1.5px;
+  color: rgba(255, 174, 61, 0.65);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+@media (max-width: 760px) {
+  .tuner-presets { grid-template-columns: repeat(3, 1fr); }
+  .tuner-preset .tp-freq { font-size: 14px; }
+}
+
+/* ============================================================
+   ELABORATE POWER-ON SEQUENCE (cascade)
+   ============================================================ */
+body.powering-on .cluster-speed .speed-btn {
+  animation: po-flicker 0.4s steps(2, end) 1;
+  animation-delay: 0.20s;
+}
+@keyframes po-flicker {
+  0%, 100% { opacity: 0.4; filter: brightness(0.6); }
+  25%      { opacity: 1.0; filter: brightness(1.2); }
+  50%      { opacity: 0.3; filter: brightness(0.5); }
+  75%      { opacity: 1.0; filter: brightness(1.1); }
+}
+body.powering-on #powerLed {
+  animation: po-power-led 0.4s ease-out 1;
+  animation-delay: 0.40s;
+  animation-fill-mode: forwards;
+}
+@keyframes po-power-led {
+  0%   { box-shadow: 0 0 0 rgba(0, 0, 0, 0); }
+  100% { box-shadow: 0 0 6px var(--green-glow), 0 0 12px var(--green-glow); }
+}
+.spectrum.is-power-sweep::after { content: ""; }
