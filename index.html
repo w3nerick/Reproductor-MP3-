@@ -4,10 +4,24 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#2a1810" />
+
+  <!-- Privacy & security headers (defense in depth) -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self';
+    style-src 'self';
+    font-src 'self';
+    img-src 'self' blob: data:;
+    media-src 'self' blob: https://ice1.somafm.com;
+    connect-src 'self';
+    object-src 'none';
+    base-uri 'self';
+    form-action 'self';
+    frame-ancestors 'none';" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="robots" content="noindex" />
+
   <title>Velouria 1200 · Hi-Fi MP3 Player</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=VT323&family=Playfair+Display:wght@700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -266,6 +280,7 @@
 
     <footer class="foot">
       <span>HAND-CRAFTED · VELOURIA AUDIO LTD. · MCMLXXXV</span>
+      <span class="privacy-note" title="No tracking, no cookies, no servers. Audio stays in your browser.">PRIVACY: ALL AUDIO STAYS IN YOUR BROWSER · NO TRACKERS</span>
     </footer>
   </main>
 

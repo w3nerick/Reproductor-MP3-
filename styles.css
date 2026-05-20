@@ -2,7 +2,41 @@
    Velouria 1200 — Hi-Fi MP3 Player
    Wood + brushed metal + amber LED + analog VU
    Themes: walnut (default) | rosewood | oak
+
+   Self-hosted fonts (no third-party tracking).
+   Original sources: rsms.me/inter, fonts.google.com (Playfair, VT323).
    ============================================================ */
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900; /* variable font */
+  font-display: swap;
+  src: url("assets/fonts/inter-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+    U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC,
+    U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Playfair Display";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("assets/fonts/playfair-display-700-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+    U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "VT323";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("assets/fonts/vt323-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+    U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
 
 :root,
 [data-theme="walnut"] {
@@ -1266,6 +1300,15 @@ html, body {
   letter-spacing: 4px;
   color: rgba(239, 230, 210, 0.4);
   margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.foot .privacy-note {
+  font-family: "VT323", monospace;
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: rgba(107, 255, 122, 0.5);
 }
 
 /* ============================================================

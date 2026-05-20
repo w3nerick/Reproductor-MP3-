@@ -644,14 +644,22 @@
     return track;
   }
 
+  // Maximum size per file (50 MB) to avoid filling IndexedDB with one huge upload.
+  const MAX_FILE_BYTES = 50 * 1024 * 1024;
+
   async function addFiles(fileList) {
     const files = Array.from(fileList).filter(
       (f) => (f.type && f.type.startsWith("audio")) || /\.mp3$/i.test(f.name)
     );
     if (!files.length) return;
 
+    let rejected = 0;
     for (const file of files) {
+      if (file.size > MAX_FILE_BYTES) { rejected++; continue; }
       await addTrackFromBlob(file, file.name, file.lastModified || Date.now(), true);
+    }
+    if (rejected > 0) {
+      console.warn(`Rejected ${rejected} file(s) larger than ${MAX_FILE_BYTES / 1024 / 1024} MB.`);
     }
     renderPlaylist();
     if (currentMode === "library" && currentIndex === -1 && tracks.length) {
@@ -1021,6 +1029,17 @@
     if (document.hidden) stopAnim(); else startAnim();
   });
 
+  // Cleanup on unload: revoke object URLs and close AudioContext to release resources.
+  window.addEventListener("beforeunload", () => {
+    for (const t of tracks) {
+      try { URL.revokeObjectURL(t.url); } catch {}
+      if (t.coverUrl) { try { URL.revokeObjectURL(t.coverUrl); } catch {} }
+    }
+    if (audioCtx && typeof audioCtx.close === "function") {
+      try { audioCtx.close(); } catch {}
+    }
+  });
+
   /* =========================================================
      20. TABS
      ========================================================= */
@@ -1057,12 +1076,16 @@
       `</li>`
     ).join("");
 
-    // Frequency dial marks
+    // Frequency dial marks (created via DOM API to avoid inline style="")
     const range = 108 - 88;
-    freqStations.innerHTML = STATIONS.map((s) => {
-      const x = ((s.freq - 88) / range) * 100;
-      return `<span class="freq-station-mark" data-station="${s.id}" style="left:${x}%"></span>`;
-    }).join("");
+    freqStations.replaceChildren();
+    for (const s of STATIONS) {
+      const mark = document.createElement("span");
+      mark.className = "freq-station-mark";
+      mark.dataset.station = s.id;
+      mark.style.left = ((s.freq - 88) / range) * 100 + "%";
+      freqStations.appendChild(mark);
+    }
   }
 
   stationListEl.addEventListener("click", (e) => {
