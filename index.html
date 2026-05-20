@@ -229,6 +229,16 @@
         <div class="preamp-row preamp-mid">
           <div class="eq-bands">
             <span class="eq-title">5-BAND GRAPHIC EQUALIZER</span>
+            <div class="eq-presets" role="group" aria-label="EQ Presets">
+              <button class="eq-preset is-active" data-preset="flat" type="button"><span class="ep-led" aria-hidden="true"></span><span class="ep-name">FLAT</span></button>
+              <button class="eq-preset" data-preset="rock" type="button"><span class="ep-led" aria-hidden="true"></span><span class="ep-name">ROCK</span></button>
+              <button class="eq-preset" data-preset="jazz" type="button"><span class="ep-led" aria-hidden="true"></span><span class="ep-name">JAZZ</span></button>
+              <button class="eq-preset" data-preset="classical" type="button"><span class="ep-led" aria-hidden="true"></span><span class="ep-name">CLASSIC</span></button>
+              <button class="eq-preset" data-preset="vocal" type="button"><span class="ep-led" aria-hidden="true"></span><span class="ep-name">VOCAL</span></button>
+              <button class="eq-preset" data-preset="bass" type="button"><span class="ep-led" aria-hidden="true"></span><span class="ep-name">BASS</span></button>
+              <button class="eq-preset" data-preset="loud" type="button"><span class="ep-led" aria-hidden="true"></span><span class="ep-name">LOUD</span></button>
+              <button class="eq-preset" data-preset="custom" type="button"><span class="ep-led" aria-hidden="true"></span><span class="ep-name">CUSTOM</span></button>
+            </div>
             <div class="eq-sliders">
               <div class="eq-slider">
                 <input type="range" min="-12" max="12" value="0" step="1" data-band="0" aria-label="60 Hz" />
@@ -290,6 +300,14 @@
               <span class="tk-label">REVERB</span>
               <span class="tk-value" data-knob="reverb">OFF</span>
             </div>
+            <div class="tone-knob">
+              <div class="tk-knob" id="widthKnob" role="slider" aria-label="Stereo Width" aria-valuemin="0" aria-valuemax="200" aria-valuenow="100" tabindex="0">
+                <div class="tk-dial"></div>
+                <div class="tk-indicator"></div>
+              </div>
+              <span class="tk-label">WIDTH</span>
+              <span class="tk-value" data-knob="width">100%</span>
+            </div>
           </div>
         </div>
 
@@ -333,6 +351,10 @@
             <button class="rocker" id="warmBtn" aria-pressed="false" title="Tape saturation + wow &amp; flutter">
               <span class="rk-led"></span>
               <span class="rk-label">WARM&nbsp;TAPE</span>
+            </button>
+            <button class="rocker" id="karaokeBtn" aria-pressed="false" title="Center vocal cancel">
+              <span class="rk-led"></span>
+              <span class="rk-label">KARAOKE</span>
             </button>
           </div>
 

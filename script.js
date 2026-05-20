@@ -70,16 +70,19 @@
   const quartzLed     = $("quartzLed");
   const spectrumCanvas = $("spectrum");
   const eqInputs      = document.querySelectorAll(".eq-slider input");
+  const eqPresetBtns  = document.querySelectorAll(".eq-preset");
   const bassKnob      = $("bassKnob");
   const trebleKnob    = $("trebleKnob");
   const balanceKnob   = $("balanceKnob");
   const reverbKnob    = $("reverbKnob");
+  const widthKnob     = $("widthKnob");
   const sourceKnob    = $("sourceKnob");
   const sourceBtns    = document.querySelectorAll(".src-btn");
   const loudnessBtn   = $("loudnessBtn");
   const subFilterBtn  = $("subFilterBtn");
   const hiFilterBtn   = $("hiFilterBtn");
   const warmBtn       = $("warmBtn");
+  const karaokeBtn    = $("karaokeBtn");
   const themeButtons  = document.querySelectorAll(".theme-btn");
   const tunerPanel    = $("tunerPanel");
   const tunerDisplay  = $("tunerDisplay");
@@ -92,6 +95,7 @@
     treble:  document.querySelector('[data-knob="treble"]'),
     balance: document.querySelector('[data-knob="balance"]'),
     reverb:  document.querySelector('[data-knob="reverb"]'),
+    width:   document.querySelector('[data-knob="width"]'),
   };
 
   /* ---------- State ---------- */
@@ -115,6 +119,10 @@
   let subHP, hiLP, tapeShaper;
   let dryGain, wetGain, convolver, mixGain;
   let panner, loudnessLow, loudnessHigh;
+  /* Stereo width nodes (mid/side matrix) */
+  let widthSplitter = null, widthMerger = null, widthSideGain = null;
+  /* Karaoke voice-cancel nodes (parallel path with wet/dry mix) */
+  let karaokeWetGain = null, karaokeDryGain = null;
 
   function makeIdentityCurve(n = 4096) {
     const c = new Float32Array(n);
@@ -239,10 +247,77 @@
       dryGain.connect(mixGain);
       wetGain.connect(mixGain);
       mixGain.connect(pannerOut);
-      pannerOut.connect(loudnessLow);
+
+      /* ---- Stereo width (mid/side matrix) ----
+         splitter -> midL(0.5)+midR(0.5) -> midSum
+         splitter -> sideL(0.5)+sideR(-0.5) -> sideSum -> widthSideGain
+         merger.input0 receives mid + side  (=> L when width=1)
+         merger.input1 receives mid - side  (=> R when width=1)
+      */
+      widthSplitter = audioCtx.createChannelSplitter(2);
+      widthMerger   = audioCtx.createChannelMerger(2);
+
+      const wMidL = audioCtx.createGain(); wMidL.gain.value = 0.5;
+      const wMidR = audioCtx.createGain(); wMidR.gain.value = 0.5;
+      const wMidSum = audioCtx.createGain(); wMidSum.gain.value = 1;
+
+      const wSideL = audioCtx.createGain(); wSideL.gain.value = 0.5;
+      const wSideR = audioCtx.createGain(); wSideR.gain.value = -0.5;
+      const wSideSum = audioCtx.createGain(); wSideSum.gain.value = 1;
+
+      widthSideGain = audioCtx.createGain(); widthSideGain.gain.value = 1; // 0..2
+
+      const wOutLPos = audioCtx.createGain(); wOutLPos.gain.value =  1;
+      const wOutLSide = audioCtx.createGain(); wOutLSide.gain.value =  1;
+      const wOutRPos = audioCtx.createGain(); wOutRPos.gain.value =  1;
+      const wOutRSide = audioCtx.createGain(); wOutRSide.gain.value = -1;
+
+      pannerOut.connect(widthSplitter);
+      widthSplitter.connect(wMidL, 0); wMidL.connect(wMidSum);
+      widthSplitter.connect(wMidR, 1); wMidR.connect(wMidSum);
+      widthSplitter.connect(wSideL, 0); wSideL.connect(wSideSum);
+      widthSplitter.connect(wSideR, 1); wSideR.connect(wSideSum);
+      wSideSum.connect(widthSideGain);
+      wMidSum.connect(wOutLPos); wOutLPos.connect(widthMerger, 0, 0);
+      widthSideGain.connect(wOutLSide); wOutLSide.connect(widthMerger, 0, 0);
+      wMidSum.connect(wOutRPos); wOutRPos.connect(widthMerger, 0, 1);
+      widthSideGain.connect(wOutRSide); wOutRSide.connect(widthMerger, 0, 1);
+
+      /* ---- Karaoke voice-cancel (parallel path; mixed by wet/dry) ----
+         Output: L' = L - R, R' = R - L
+         When wet=1, dry=0 -> full karaoke. When wet=0, dry=1 -> bypass.
+      */
+      const kInSplitter = audioCtx.createChannelSplitter(2);
+      const kMerger     = audioCtx.createChannelMerger(2);
+
+      const kL_pos  = audioCtx.createGain(); kL_pos.gain.value =  1;
+      const kR_neg  = audioCtx.createGain(); kR_neg.gain.value = -1;
+      const kL_neg  = audioCtx.createGain(); kL_neg.gain.value = -1;
+      const kR_pos  = audioCtx.createGain(); kR_pos.gain.value =  1;
+
+      widthMerger.connect(kInSplitter);
+      kInSplitter.connect(kL_pos, 0); kL_pos.connect(kMerger, 0, 0);
+      kInSplitter.connect(kR_neg, 1); kR_neg.connect(kMerger, 0, 0);
+      kInSplitter.connect(kL_neg, 0); kL_neg.connect(kMerger, 0, 1);
+      kInSplitter.connect(kR_pos, 1); kR_pos.connect(kMerger, 0, 1);
+
+      karaokeDryGain = audioCtx.createGain(); karaokeDryGain.gain.value = 1;
+      karaokeWetGain = audioCtx.createGain(); karaokeWetGain.gain.value = 0;
+      const karaokeMix = audioCtx.createGain(); karaokeMix.gain.value = 1;
+
+      widthMerger.connect(karaokeDryGain);
+      kMerger.connect(karaokeWetGain);
+      karaokeDryGain.connect(karaokeMix);
+      karaokeWetGain.connect(karaokeMix);
+
+      karaokeMix.connect(loudnessLow);
       loudnessLow.connect(loudnessHigh);
       loudnessHigh.connect(analyser);
       analyser.connect(audioCtx.destination);
+
+      /* Apply current control state (in case persisted values were set before graph existed) */
+      try { applyWidth(widthValue); } catch(e) {}
+      try { applyKaraoke(karaokeOn); } catch(e) {}
     } catch (err) {
       console.warn("AudioContext unavailable:", err);
     }
@@ -548,6 +623,30 @@
       wetGain.gain.linearRampToValueAtTime(0.32, t + 0.2);
       dryGain.gain.linearRampToValueAtTime(0.85, t + 0.2);
     }
+  }
+
+  /* Stereo Width (0 = mono, 1 = identity, 2 = super-wide) */
+  let widthValue = 1.0;
+  function applyWidth(v) {
+    widthValue = Math.max(0, Math.min(2, v));
+    if (!widthSideGain || !audioCtx) return;
+    const t = audioCtx.currentTime;
+    widthSideGain.gain.cancelScheduledValues(t);
+    widthSideGain.gain.linearRampToValueAtTime(widthValue, t + 0.05);
+  }
+
+  /* Karaoke / Voice Cancel toggle */
+  let karaokeOn = false;
+  function applyKaraoke(on) {
+    karaokeOn = !!on;
+    if (!karaokeWetGain || !karaokeDryGain || !audioCtx) return;
+    const t = audioCtx.currentTime;
+    const wet = karaokeOn ? 1 : 0;
+    const dry = karaokeOn ? 0 : 1;
+    karaokeWetGain.gain.cancelScheduledValues(t);
+    karaokeDryGain.gain.cancelScheduledValues(t);
+    karaokeWetGain.gain.linearRampToValueAtTime(wet, t + 0.08);
+    karaokeDryGain.gain.linearRampToValueAtTime(dry, t + 0.08);
   }
 
   /* ---------- Wow & flutter (LFO on playbackRate) ---------- */
@@ -1176,24 +1275,119 @@
     },
   });
 
+  /* ---------- Stereo Width knob ---------- */
+  const widthCtrl = makeKnob(widthKnob, {
+    min: 0, max: 200, init: 100, dragRange: 220,
+    onChange: (v) => {
+      applyWidth(v / 100);
+      try { localStorage.setItem("velouria.width", String(v / 100)); } catch(e) {}
+    },
+    label: (v) => {
+      if (knobValueElems.width) knobValueElems.width.textContent = Math.round(v) + "%";
+    },
+  });
+
   /* ---------- EQ sliders ---------- */
+  /* Preset definitions: 5-band gain values [60Hz, 250Hz, 1kHz, 4kHz, 12kHz] in dB */
+  const EQ_PRESETS = {
+    flat:      [ 0,  0,  0,  0,  0],
+    rock:      [ 5,  3, -2,  3,  5],
+    jazz:      [ 3,  2,  0,  2,  3],
+    classical: [ 4,  2,  0,  3,  4],
+    vocal:     [-2, -1,  4,  3,  1],
+    bass:      [ 8,  6,  2, -1, -2],
+    loud:      [ 6,  3,  0,  3,  6],
+  };
+  const eqCustomGains = [0, 0, 0, 0, 0];
+  let activeEqPreset = "flat";
+  let eqAnimationRaf = 0;
+  let suppressPresetSwitch = false;
+
+  function updateEqThumb(input) {
+    const slider = input.parentElement;
+    const v = Number(input.value);
+    const pct = ((v - Number(input.min)) / (Number(input.max) - Number(input.min))) * 100;
+    slider.style.setProperty("--eq-pct", pct.toFixed(1) + "%");
+    slider.classList.toggle("is-cut",   v < -1);
+    slider.classList.toggle("is-boost", v >  1);
+  }
+
+  function setEqPresetUI(name) {
+    activeEqPreset = name;
+    eqPresetBtns.forEach((b) => b.classList.toggle("is-active", b.dataset.preset === name));
+    try { localStorage.setItem("velouria.eqPreset", name); } catch(e) {}
+  }
+
+  function animateEqTo(targetGains, durationMs, onDone) {
+    cancelAnimationFrame(eqAnimationRaf);
+    const startVals = Array.from(eqInputs).map((inp) => Number(inp.value));
+    const t0 = performance.now();
+    suppressPresetSwitch = true;
+    const step = () => {
+      const t = Math.min(1, (performance.now() - t0) / durationMs);
+      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      eqInputs.forEach((inp, i) => {
+        const cur = startVals[i] + (targetGains[i] - startVals[i]) * ease;
+        const rounded = Math.round(cur);
+        inp.value = String(rounded);
+        applyEqBand(i, cur);
+        updateEqThumb(inp);
+      });
+      if (t < 1) eqAnimationRaf = requestAnimationFrame(step);
+      else {
+        targetGains.forEach((g, i) => applyEqBand(i, g));
+        suppressPresetSwitch = false;
+        if (onDone) onDone();
+      }
+    };
+    step();
+  }
+
+  function applyEqPreset(name, animate) {
+    const gains = name === "custom" ? eqCustomGains.slice() : (EQ_PRESETS[name] || EQ_PRESETS.flat).slice();
+    if (animate) animateEqTo(gains, 300);
+    else {
+      eqInputs.forEach((inp, i) => { inp.value = String(gains[i]); applyEqBand(i, gains[i]); updateEqThumb(inp); });
+    }
+    setEqPresetUI(name);
+  }
+
   eqInputs.forEach((input) => {
     const band = Number(input.dataset.band);
-    const slider = input.parentElement;
-    const updateThumb = () => {
-      const v = Number(input.value);
-      const pct = ((v - Number(input.min)) / (Number(input.max) - Number(input.min))) * 100;
-      slider.style.setProperty("--eq-pct", pct.toFixed(1) + "%");
-      slider.classList.toggle("is-cut",   v < -1);
-      slider.classList.toggle("is-boost", v >  1);
-    };
-    updateThumb();
+    updateEqThumb(input);
     input.addEventListener("input", () => {
       const v = Number(input.value);
       applyEqBand(band, v);
-      updateThumb();
+      updateEqThumb(input);
+      if (suppressPresetSwitch) return;
+      // Manually moving any slider switches active preset to CUSTOM
+      eqCustomGains[band] = v;
+      // Snapshot current slider state into custom
+      eqInputs.forEach((inp, i) => { eqCustomGains[i] = Number(inp.value); });
+      if (activeEqPreset !== "custom") setEqPresetUI("custom");
     });
   });
+
+  eqPresetBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      sfx.toggleClick();
+      const name = btn.dataset.preset;
+      if (name === "custom") {
+        // Re-apply custom snapshot (no-op visually if it's already custom)
+        applyEqPreset("custom", true);
+      } else {
+        applyEqPreset(name, true);
+      }
+    });
+  });
+
+  /* Restore last EQ preset (default FLAT) */
+  try {
+    const savedPreset = localStorage.getItem("velouria.eqPreset");
+    if (savedPreset && (EQ_PRESETS[savedPreset] || savedPreset === "custom")) {
+      applyEqPreset(savedPreset, false);
+    }
+  } catch(e) {}
 
   /* ---------- Filter rocker switches ---------- */
   function bindRocker(btn, getOn, setOn) {
@@ -1209,6 +1403,10 @@
   bindRocker(subFilterBtn, () => subFilterOn, applySubFilter);
   bindRocker(hiFilterBtn,  () => hiFilterOn,  applyHiFilter);
   bindRocker(warmBtn,      () => warmOn,      (v) => { applyWarm(v); if (v) wfStart = performance.now(); });
+  bindRocker(karaokeBtn,   () => karaokeOn,   (v) => {
+    applyKaraoke(v);
+    try { localStorage.setItem("velouria.karaoke", v ? "true" : "false"); } catch(e) {}
+  });
 
   /* ---------- Source selector (PHONO / TUNER / AUX / TAPE) ---------- */
   let currentSource = "phono";
@@ -1471,6 +1669,24 @@
   // Sync SFX button visual with persisted preference
   sfxBtn.classList.toggle("is-active", sfx.enabled);
   sfxBtn.setAttribute("aria-pressed", String(sfx.enabled));
+
+  /* Restore standalone audio prefs (width, karaoke) */
+  try {
+    const savedW = parseFloat(localStorage.getItem("velouria.width"));
+    if (isFinite(savedW) && savedW >= 0 && savedW <= 2) {
+      widthCtrl.set(Math.round(savedW * 100));
+    }
+  } catch(e) {}
+  try {
+    if (localStorage.getItem("velouria.karaoke") === "true") {
+      karaokeOn = true;
+      karaokeBtn.classList.add("is-active");
+      karaokeBtn.setAttribute("aria-pressed", "true");
+      // applyKaraoke is a no-op until graph exists; first play() will trigger ensureAudioGraph
+      // but we also call it now in case graph already exists.
+      applyKaraoke(true);
+    }
+  } catch(e) {}
 
   // Power-on animation: relay thunk after 600ms, full power after 1.2s
   setTimeout(() => {
