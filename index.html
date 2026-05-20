@@ -1,26 +1,43 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="walnut">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#2a1810" />
+
+  <!-- Privacy & security headers (defense in depth) -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self';
+    style-src 'self';
+    font-src 'self';
+    img-src 'self' blob: data:;
+    media-src 'self' blob: https://ice1.somafm.com;
+    connect-src 'self';
+    object-src 'none';
+    base-uri 'self';
+    form-action 'self';
+    frame-ancestors 'none';" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="robots" content="noindex" />
+
   <title>Velouria 1200 · Hi-Fi MP3 Player</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=VT323&family=Playfair+Display:wght@700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="room" aria-hidden="true">
-    <div class="room-light"></div>
-  </div>
+  <div class="room" aria-hidden="true"><div class="room-light"></div></div>
 
   <main class="hifi">
-    <!-- ================= Brand plate ================= -->
+    <!-- ================= Brand plate + theme picker ================= -->
     <header class="brand">
       <div class="brand-plate">
         <span class="brand-name">VELOURIA</span>
         <span class="brand-model">DIRECT-DRIVE TURNTABLE · STEREO HI-FI · MODEL 1200</span>
+      </div>
+      <div class="theme-picker" role="radiogroup" aria-label="Wood finish">
+        <button class="theme-swatch is-active" data-theme="walnut" role="radio" aria-checked="true" title="Walnut"></button>
+        <button class="theme-swatch" data-theme="rosewood" role="radio" aria-checked="false" title="Rosewood"></button>
+        <button class="theme-swatch" data-theme="oak" role="radio" aria-checked="false" title="Oak"></button>
       </div>
     </header>
 
@@ -28,20 +45,17 @@
     <section class="turntable" aria-label="Tocadiscos">
       <div class="plinth">
         <div class="deck-top">
-          <!-- Power LED -->
           <div class="cluster cluster-power">
             <div class="led-dot" id="powerLed" aria-hidden="true"></div>
             <span class="cluster-label">POWER</span>
           </div>
 
-          <!-- Speed buttons 33 / 45 -->
           <div class="cluster cluster-speed">
             <button class="speed-btn is-active" data-speed="33" aria-pressed="true">33</button>
             <button class="speed-btn" data-speed="45" aria-pressed="false">45</button>
             <span class="cluster-label">RPM</span>
           </div>
 
-          <!-- Platter well with strobe ring + vinyl -->
           <div class="platter-well">
             <div class="strobe-ring" aria-hidden="true"></div>
             <div class="platter" id="platter">
@@ -49,9 +63,10 @@
                 <div class="vinyl" id="vinyl">
                   <div class="vinyl-grooves"></div>
                   <div class="vinyl-shine"></div>
-                  <div class="vinyl-label">
+                  <div class="vinyl-label" id="vinylLabel">
+                    <div class="label-cover" id="labelCover" hidden></div>
                     <div class="label-ring"></div>
-                    <div class="label-text">
+                    <div class="label-text" id="labelText">
                       <span class="label-title" id="vinylTitle">NO RECORD</span>
                       <span class="label-artist" id="vinylArtist">— LOAD A TRACK —</span>
                     </div>
@@ -62,7 +77,6 @@
             </div>
           </div>
 
-          <!-- Tonearm assembly -->
           <div class="tonearm-mount">
             <div class="tonearm-pivot"></div>
             <div class="tonearm" id="tonearm">
@@ -72,13 +86,11 @@
             </div>
           </div>
 
-          <!-- Cueing lever -->
           <div class="cueing">
             <span class="cueing-label">CUE</span>
             <div class="cueing-lever" id="cueingLever"></div>
           </div>
 
-          <!-- Pitch fader (decorative) -->
           <div class="pitch-fader" aria-hidden="true">
             <span class="pitch-label">PITCH</span>
             <div class="pitch-track">
@@ -92,11 +104,10 @@
       </div>
     </section>
 
-    <!-- ================= Amplifier / receiver ================= -->
+    <!-- ================= Amplifier ================= -->
     <section class="amp" aria-label="Amplificador">
       <div class="amp-case">
         <div class="amp-face">
-          <!-- VU meters (stereo) -->
           <div class="vu-section">
             <div class="vu-meter">
               <canvas class="vu-canvas" data-channel="L"></canvas>
@@ -108,7 +119,6 @@
             </div>
           </div>
 
-          <!-- LED amber display -->
           <div class="led-display">
             <div class="led-window">
               <div class="led-row led-row-top">
@@ -128,19 +138,18 @@
             </div>
           </div>
 
-          <!-- Transport buttons -->
           <div class="transport">
             <button class="tx-btn" id="prevBtn" aria-label="Anterior">
-              <span class="tx-icon">◄◄</span>
+              <span class="tx-icon">&#9664;&#9664;</span>
               <span class="tx-text">PREV</span>
             </button>
             <button class="tx-btn tx-play" id="playBtn" aria-label="Reproducir">
-              <span class="tx-icon" id="iconPlay">▶</span>
-              <span class="tx-icon" id="iconPause" hidden>❚❚</span>
+              <span class="tx-icon" id="iconPlay">&#9654;</span>
+              <span class="tx-icon" id="iconPause" hidden>&#10074;&#10074;</span>
               <span class="tx-text" id="playLabel">PLAY</span>
             </button>
             <button class="tx-btn" id="nextBtn" aria-label="Siguiente">
-              <span class="tx-icon">►►</span>
+              <span class="tx-icon">&#9654;&#9654;</span>
               <span class="tx-text">NEXT</span>
             </button>
             <button class="tx-btn tx-toggle" id="shuffleBtn" aria-pressed="false">
@@ -151,21 +160,16 @@
               <span class="tx-text">RPT</span>
               <span class="tx-led"></span>
             </button>
+            <button class="tx-btn tx-toggle is-active" id="sfxBtn" aria-pressed="true" title="Mechanical sound effects">
+              <span class="tx-text">SFX</span>
+              <span class="tx-led"></span>
+            </button>
           </div>
 
-          <!-- Volume knob -->
           <div class="knob-cluster">
-            <div class="knob"
-                 id="volumeKnob"
-                 role="slider"
-                 aria-label="Volume"
-                 aria-valuemin="0"
-                 aria-valuemax="100"
-                 aria-valuenow="80"
-                 tabindex="0">
+            <div class="knob" id="volumeKnob" role="slider" aria-label="Volume" aria-valuemin="0" aria-valuemax="100" aria-valuenow="80" tabindex="0">
               <div class="knob-body">
                 <div class="knob-dial"></div>
-                <div class="knob-indicator"></div>
               </div>
               <div class="knob-ticks" aria-hidden="true"></div>
               <span class="knob-label">VOLUME</span>
@@ -176,35 +180,111 @@
       </div>
     </section>
 
-    <!-- ================= Track index ================= -->
-    <section class="track-index" aria-label="Lista de reproducción">
-      <header class="ti-head">
-        <div class="ti-title">
-          <h2>TRACK INDEX</h2>
-          <span class="ti-count" id="trackCount">0 RECORDS</span>
+    <!-- ================= Control deck (tabbed) ================= -->
+    <section class="deck" data-active-tab="library" aria-label="Control deck">
+      <header class="deck-head">
+        <div class="deck-tabs" role="tablist">
+          <button class="deck-tab is-active" role="tab" aria-selected="true" data-tab="library">LIBRARY</button>
+          <button class="deck-tab" role="tab" aria-selected="false" data-tab="radio">RADIO</button>
+          <button class="deck-tab" role="tab" aria-selected="false" data-tab="eq">EQ</button>
         </div>
-        <div class="ti-actions">
-          <label class="btn-mech" for="fileInput">
-            <span>+ LOAD</span>
-          </label>
+        <div class="deck-actions" id="deckActions">
+          <label class="btn-mech" for="fileInput"><span>+ LOAD</span></label>
           <input id="fileInput" type="file" accept="audio/mpeg,audio/mp3,audio/*" multiple hidden />
           <button class="btn-mech ghost" id="clearBtn">EJECT ALL</button>
         </div>
       </header>
 
-      <div class="dropzone" id="dropzone">
-        <div class="dz-inner">
-          <span class="dz-icon">♫</span>
-          <p>DROP YOUR MP3 RECORDS HERE</p>
-          <small>or use the LOAD button above</small>
+      <!-- LIBRARY -->
+      <div class="deck-panel" data-panel="library">
+        <div class="ti-title-row">
+          <span class="ti-count" id="trackCount">0 RECORDS</span>
+          <span class="ti-hint">DROP MP3 ANYWHERE TO ADD</span>
         </div>
+        <div class="dropzone" id="dropzone">
+          <div class="dz-inner">
+            <span class="dz-icon">&#9835;</span>
+            <p>DROP YOUR MP3 RECORDS HERE</p>
+            <small>or use the LOAD button above</small>
+          </div>
+        </div>
+        <ol class="track-list" id="playlist"></ol>
       </div>
 
-      <ol class="track-list" id="playlist"></ol>
+      <!-- RADIO -->
+      <div class="deck-panel" data-panel="radio" hidden>
+        <div class="radio-display">
+          <div class="freq-readout">
+            <span class="freq-prefix">FM</span>
+            <span class="freq-value" id="freqValue">— — —</span>
+            <span class="freq-unit">MHz</span>
+          </div>
+          <div class="freq-dial">
+            <div class="freq-scale" id="freqScale" aria-hidden="true">
+              <span>88</span><span>92</span><span>96</span><span>100</span><span>104</span><span>108</span>
+            </div>
+            <div class="freq-stations" id="freqStations" aria-hidden="true"></div>
+            <div class="freq-needle" id="freqNeedle"></div>
+          </div>
+          <div class="signal-bar">
+            <span class="signal-label">SIGNAL</span>
+            <div class="signal-leds" id="signalLeds"><i></i><i></i><i></i><i></i><i></i></div>
+            <span class="stereo-led" id="stereoLed">STEREO</span>
+          </div>
+        </div>
+        <ul class="station-list" id="stationList"></ul>
+      </div>
+
+      <!-- EQ -->
+      <div class="deck-panel" data-panel="eq" hidden>
+        <div class="eq-frame">
+          <div class="eq-bands">
+            <div class="eq-band" data-band="low">
+              <span class="eq-readout" data-out="low">+0</span>
+              <div class="eq-track" tabindex="0" role="slider" aria-label="Low band" aria-valuemin="-12" aria-valuemax="12" aria-valuenow="0">
+                <div class="eq-zero"></div>
+                <div class="eq-fill"></div>
+                <div class="eq-thumb"></div>
+              </div>
+              <span class="eq-name">LOW</span>
+              <span class="eq-freq">120 Hz</span>
+            </div>
+            <div class="eq-band" data-band="mid">
+              <span class="eq-readout" data-out="mid">+0</span>
+              <div class="eq-track" tabindex="0" role="slider" aria-label="Mid band" aria-valuemin="-12" aria-valuemax="12" aria-valuenow="0">
+                <div class="eq-zero"></div>
+                <div class="eq-fill"></div>
+                <div class="eq-thumb"></div>
+              </div>
+              <span class="eq-name">MID</span>
+              <span class="eq-freq">1 kHz</span>
+            </div>
+            <div class="eq-band" data-band="high">
+              <span class="eq-readout" data-out="high">+0</span>
+              <div class="eq-track" tabindex="0" role="slider" aria-label="High band" aria-valuemin="-12" aria-valuemax="12" aria-valuenow="0">
+                <div class="eq-zero"></div>
+                <div class="eq-fill"></div>
+                <div class="eq-thumb"></div>
+              </div>
+              <span class="eq-name">HIGH</span>
+              <span class="eq-freq">5 kHz</span>
+            </div>
+          </div>
+          <div class="eq-presets" id="eqPresets">
+            <button class="btn-mech is-active" data-preset="flat">FLAT</button>
+            <button class="btn-mech" data-preset="rock">ROCK</button>
+            <button class="btn-mech" data-preset="jazz">JAZZ</button>
+            <button class="btn-mech" data-preset="pop">POP</button>
+            <button class="btn-mech" data-preset="classic">CLASSIC</button>
+            <button class="btn-mech" data-preset="bass">BASS+</button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <footer class="foot">
       <span>HAND-CRAFTED · VELOURIA AUDIO LTD. · MCMLXXXV</span>
+      <span class="privacy-note" title="No tracking, no cookies, no servers. Audio stays in your browser.">PRIVACY: ALL AUDIO STAYS IN YOUR BROWSER · NO TRACKERS</span>
     </footer>
   </main>
 
